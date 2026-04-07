@@ -7,7 +7,8 @@ using UnityEngine;
 [RequireComponent(typeof(CharacterController))]
 public class Character : MonoBehaviour
 {
-    public FloatingJoystick joystick;
+    [Header("CrossHair")]
+    public Crosshair crosshair;
     
     public LayerMask groundLayer;
     private CharacterController _characterControllercc;
@@ -51,8 +52,15 @@ public class Character : MonoBehaviour
     void Update()
     {
         CharacterMovement();
-        _isAiming = Input.GetMouseButton(0);
-
+        _isAiming = Input.GetMouseButton(1);
+        if (crosshair is not null)
+        {
+            crosshair.SetAiming(_isAiming);
+        }
+        if (Input.GetMouseButtonDown(0))
+        {
+            Fire();
+        }
         HandleAimAndCamera();
         
     }
@@ -109,6 +117,13 @@ public class Character : MonoBehaviour
         }
     }
 
+    private void Fire()
+    {
+        if (crosshair is not null)
+        {
+            crosshair.AddSpread();
+        }
+    }
     public void AddMineral(Mineral mineral)
     {
         minerals.Add(mineral);
