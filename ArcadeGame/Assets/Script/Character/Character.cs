@@ -15,12 +15,17 @@ public class Character : MonoBehaviour
     [SerializeField]
     public MiningTool miningTool;
 
+    [Header("Gravity")] 
+    public float gravity = -15f;
+    private float _velocityY;
+   
     private bool _isAiming = false;
     private Vector3 _moveDirection;
     private float _rotateSpeed = 15f;
     [Header("캐릭터 스탯")]
     [SerializeField]
-    public float speed = 4f;
+    public float normalspeed = 8f;
+    public float aimingSpeed = 4f;
     [Header("채광 기술")]
     [SerializeField] public List<MiningTool> miningTools;
     [Header("탐지된 광물 리스트")]
@@ -76,9 +81,15 @@ public class Character : MonoBehaviour
         camRight.y = 0f;
         camForward.Normalize();
         camRight.Normalize();
-        
+        float characterSpeed = _isAiming ? aimingSpeed : normalspeed;
         _moveDirection = (camForward * v) + (camRight * h).normalized;
-        _characterControllercc.Move(_moveDirection * (speed * Time.deltaTime));
+        if (_characterControllercc.isGrounded && _velocityY < 0)
+        {
+            _velocityY = -2f;
+        }
+        _velocityY += gravity * Time.deltaTime;
+        Vector3 finalMove = (_moveDirection * characterSpeed) + (Vector3.up * _velocityY);
+        _characterControllercc.Move(finalMove* Time.deltaTime);
         
     }
     void HandleAimAndCamera()
