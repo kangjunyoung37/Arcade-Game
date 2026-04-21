@@ -20,13 +20,8 @@ public class PoolAble : MonoBehaviour
         gameObject.transform.rotation = Quaternion.Euler(0,0,0);
         gameObject.transform.localScale = Vector3.one;
         Pool.Release(gameObject);
-        transform.DOKill();
     }
     
-    public void OnEnable()
-    {
-        
-    }
     public void PopUpEffect()
     {
         // 현재 크기는 (1,1,1)이어야 합니다.

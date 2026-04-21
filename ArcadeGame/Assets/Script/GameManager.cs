@@ -8,18 +8,12 @@ public class GameManager : MonoBehaviour
 {
     public static GameManager Instance;
     [SerializeField] private Character mainCharacter;
-    [SerializeField] private Furnace furnace;
-    [SerializeField] private FrontDesk frontDesk;
-    [SerializeField] private HandCuffsStorge handcuffsStorge;
-    [SerializeField] private Prison prison;
-    [SerializeField] private DrillUnlock drillUnlock;
     [SerializeField] private MainCamera mainCamera;
-    [SerializeField] private ConditionalArrow arrow;
-    [Header("죄수 스폰 포인트")]
-    [SerializeField] private Transform spawnPoint;
     
-    [Header("죄수 감옥 이동 경로")]
-    [SerializeField] public List<Transform> moveToPrisonPoints = new List<Transform>();
+    [Header("Update Lists")] 
+    private List<IUpdateable> _players = new List<IUpdateable>();
+    private List<IUpdateable> _enemies = new List<IUpdateable>();
+    private List<IUpdateable> _bullets = new List<IUpdateable>();
     private void Awake()
     {
         if (Instance == null)
@@ -32,64 +26,48 @@ public class GameManager : MonoBehaviour
         }
     }
 
-    private void Start()
+    private void Update()
     {
-        StartCoroutine(SpawnPrisoner());
+        //UpdateList(_players, Time.deltaTime);
+        UpdateList(_bullets, Time.deltaTime);
+    }
+    
+    private void UpdateList(List<IUpdateable> list, float dt)
+    {
+
+        for (int i = list.Count - 1; i >= 0; i--)
+        {
+            list[i].OnTick(dt);
+        }    
+    }
+
+    public void AddPlayer(IUpdateable player)
+    {
+         if(!_players.Contains(player)) _players.Add(player);
+    }
+
+    public void RemovePlayer(IUpdateable player)
+    {
+        _players.Remove(player);
+    }
+
+    public void AddBullet(IUpdateable bullet)
+    {
+        if (!_bullets.Contains(bullet)) _bullets.Add(bullet);
+    }
+
+    public void RemoveBullet(IUpdateable bullet)
+    {
+        _bullets.Remove(bullet);
     }
     public Character GetCharacter()
     {
         return mainCharacter;
     }
-
-    public Furnace GetFurnace()
-    {
-        return furnace;
-    }
-
-    public FrontDesk GetFrontDesk()
-    {
-        return frontDesk;
-    }
-
-    public Prison GetPrison()
-    {
-        return prison;
-    }
-
-    public DrillUnlock GetDrillUnlock()
-    {
-        return drillUnlock;
-    }
-    public HandCuffsStorge GetHandcuffsStorge()
-    {
-        return handcuffsStorge;
-    }
-
+    
     public MainCamera GetMainCamera()
     {
         return mainCamera;
     }
-
-    public ConditionalArrow GetArrow()
-    {
-        return arrow;
-    }
-    IEnumerator SpawnPrisoner()
-    {
-        while (true)
-        {
-            if (frontDesk.prisoners.Count < 4)
-            {
-                var npc = ObjectPoolManager.instance.GetGo("Prisoner");
-                npc.transform.position = spawnPoint.position;
-                Prisoner prisoner = npc.GetComponent<Prisoner>();
-                prisoner.Init();
-                frontDesk.prisoners.Add(prisoner);
-                
-            }
-
-            yield return new WaitForSeconds(0.1f);
-        }
-        
-    }
+    
 }
