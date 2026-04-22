@@ -4,6 +4,10 @@ using UnityEngine;
 
 public class Crosshair : MonoBehaviour
 {
+
+   [Header("Target Reference")] 
+   public Character player;
+   
    [Header("UI Elements")] 
    public RectTransform crosshairRoot;
    public RectTransform topBar,bottomBar,leftBar,rightBar;
@@ -18,6 +22,8 @@ public class Crosshair : MonoBehaviour
    private float _currentSpread;
    private float _targetBaseSpread;
 
+   [Header("UI Settings")]
+   public float spreadMultiplier = 5f;
    private void Start()
    {
       Cursor.visible = false;
@@ -29,7 +35,6 @@ public class Crosshair : MonoBehaviour
    {
       if (crosshairRoot != null)
          crosshairRoot.position = Input.mousePosition;
-      
       _currentSpread = Mathf.Lerp(_currentSpread, _targetBaseSpread, Time.deltaTime * spreadRecoverySpeed);
       ApplySpread();
    }
@@ -39,9 +44,9 @@ public class Crosshair : MonoBehaviour
       _targetBaseSpread = isAiming ? aimSpread : idleSpread; 
    }
 
-   public void AddSpread()
+   public void AddSpread(float amount)
    {
-      _currentSpread += spreadPerShot;
+      _currentSpread += amount;
       _currentSpread = Mathf.Clamp(_currentSpread, 0, maxSpread);
       
    }

@@ -1,7 +1,8 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
-
+using Random = UnityEngine.Random;
 
 
 [RequireComponent(typeof(CharacterController))]
@@ -21,32 +22,51 @@ public class Character : MonoBehaviour
     private Vector3 _moveDirection;
     private float _rotateSpeed = 15f;
     
-    [Header("캐릭터 스탯")]
+    [Header("Character Stat")]
     [SerializeField]
     public float normalspeed = 8f;
     public float aimingSpeed = 4f;
+    
 
-
-    private MainCamera _mainCamera;
-    private Camera mainCamera;
-
+    [Header("Shoot Settings")]
+    private float _lastFireTime;
+    private bool _isCooldown = false;
+    public float CurrentSpread { get; private set; }
+    
     [Header("Shoot Test")]
     public Transform bulletSpawnPoint;
+    public WeaponData currentWeaponData;
     
     //조준시 카메라 설정
     [Header("Camera Aim")] 
     public Transform cameraTarget;
     public float aimCameraDistance = 4.0f;
     public float aimCameraSpeed = 5f;
-    
+
+    private HealthSystem _health;
+    private MainCamera _mainCamera;
+    private Camera mainCamera;
+    private void Awake()
+    {
+        _health = GetComponent<HealthSystem>();
+        _characterControllercc = GetComponent<CharacterController>();
+        if (_health is not null)
+        {
+            _health.onDied += HandleDeath;
+        }
+    }
+
     private void Start()
     {
-        _characterControllercc = GetComponent<CharacterController>();
         mainCamera = Camera.main;
         _mainCamera = mainCamera.GetComponent<MainCamera>();
+        if (currentWeaponData is not null)
+        {
+            CurrentSpread = currentWeaponData.baseSpread;
+        }
     }
     
-    void Update()
+    private void Update()
     {
         CharacterMovement();
         _isAiming = Input.GetMouseButton(1);
@@ -54,12 +74,17 @@ public class Character : MonoBehaviour
         {
             crosshair.SetAiming(_isAiming);
         }
-        if (Input.GetMouseButtonDown(0))
-        {
-            Fire();
-        }
+        TryFire();
         HandleAimAndCamera();
-        
+        HandleSpreadRecovery();
+    }
+
+    private void OnDestroy()
+    {
+        if (_health is not null)
+        {
+            _health.onDied -= HandleDeath;
+        }
     }
 
     void CharacterMovement()
@@ -106,7 +131,6 @@ public class Character : MonoBehaviour
         if(!_isAiming)
             targetLookDirection = _moveDirection; 
         
-        
         targetLookDirection.y = 0f; 
         if (targetLookDirection.magnitude > 0.1f)
         {
@@ -120,19 +144,84 @@ public class Character : MonoBehaviour
         }
     }
 
-    private void Fire()
+    private void HandleSpreadRecovery()
     {
-        if (crosshair is not null)
+        if (Time.time > _lastFireTime + currentWeaponData.fireRate * 1.5f)
         {
-            crosshair.AddSpread();
-            GameObject bullet = ObjectPoolManager.instance.GetGo("Bullet");
-            bullet.transform.position = bulletSpawnPoint.position;
-            bullet.transform.rotation = bulletSpawnPoint.rotation;
-            if (bullet.TryGetComponent(out Bullet t))
-            {
-                t.Init();
-            }
+            CurrentSpread = Mathf.MoveTowards(CurrentSpread, currentWeaponData.baseSpread,
+                currentWeaponData.recoveryRate * Time.deltaTime);
+        }
+    }
+    private void TryFire()
+    {
+        if (_isCooldown) return;
+        switch (currentWeaponData.fireMode)
+        {
+            case FireMode.Single:
+                if (Input.GetMouseButtonDown(0))
+                {
+                    Fire();
+                    StartCoroutine(FireCooldown(currentWeaponData.singleFireDelay));
+                }
+                break;
+
+            case FireMode.Auto:
+                if (Input.GetMouseButton(0) && Time.time >= _lastFireTime + currentWeaponData.fireRate)
+                {
+                    Fire();
+                    _lastFireTime = Time.time;
+                }
+                break;
+
+            case FireMode.Burst:
+                if (Input.GetMouseButtonDown(0))
+                {
+                    StartCoroutine(BurstFireRoutine());
+                }
+                break;
         }
     }
     
+    //Bullet Fire
+    private void Fire()
+    {
+        crosshair.AddSpread(CurrentSpread);
+        GameObject bullet = ObjectPoolManager.instance.GetGo("Bullet");
+        float randowYaw = Random.Range(-CurrentSpread, CurrentSpread);
+        Quaternion spreadRotation = Quaternion.Euler(0, randowYaw, 0);
+        
+        bullet.transform.position = bulletSpawnPoint.position;
+        bullet.transform.rotation = bulletSpawnPoint.rotation * spreadRotation;
+        CurrentSpread += currentWeaponData.bloomPerShot;
+        CurrentSpread = Mathf.Clamp(CurrentSpread, currentWeaponData.baseSpread, currentWeaponData.maxSpread);
+        if (bullet.TryGetComponent(out Bullet b))
+        {
+            b.Init();
+        }
+        
+    }
+    
+    private IEnumerator FireCooldown(float delay)
+    {
+        _isCooldown = true;
+        yield return new WaitForSeconds(delay);
+        _isCooldown = false;
+    }
+
+    private IEnumerator BurstFireRoutine()
+    {
+        _isCooldown = true; 
+        for (int i = 0; i < currentWeaponData.burstCount; i++)
+        {
+            Fire();
+            yield return new WaitForSeconds(currentWeaponData.fireRate);
+        }
+        
+        yield return new WaitForSeconds(currentWeaponData.burstPostDelay);
+        _isCooldown = false;
+    }
+    private void HandleDeath()
+    {
+        Debug.Log("죽음");
+    }
 }
