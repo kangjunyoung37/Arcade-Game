@@ -5,7 +5,7 @@ public class HealthSystem : MonoBehaviour, IDamageable
 {
     public float maxHealth = 100f;
     private float _currentHealth;
-
+    public bool isInvincible = false;
     public Action<float, float> onHealthChange;
     public Action onDied;
 
@@ -23,7 +23,7 @@ public class HealthSystem : MonoBehaviour, IDamageable
         if (_currentHealth <= 0)
         {
             _currentHealth = 0;
-            onDied?.Invoke();
+            //onDied?.Invoke();
         }
     }
 }
