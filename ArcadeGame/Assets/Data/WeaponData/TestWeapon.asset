@@ -20,7 +20,7 @@ MonoBehaviour:
   burstCount: 3
   baseSpread: 0.2
   maxSpread: 10
-  bloomPerShot: 2
+  bloomPerShot: 0.2
   recoveryRate: 10
   reloadTime: 0
   magazineSize: 0

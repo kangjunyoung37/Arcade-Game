@@ -11,7 +11,7 @@ GameObject:
   - component: {fileID: 292263943058176903}
   - component: {fileID: 6286173385325134514}
   - component: {fileID: 1913249143163278880}
-  m_Layer: 0
+  m_Layer: 6
   m_Name: BulletObject
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -94,8 +94,7 @@ GameObject:
   - component: {fileID: 7096776197810596079}
   - component: {fileID: 2732337161158456363}
   - component: {fileID: 4206962411481109669}
-  - component: {fileID: 9041960595342789617}
-  m_Layer: 0
+  m_Layer: 6
   m_Name: Bullet
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -135,6 +134,10 @@ MonoBehaviour:
   tossDuration: 0.6
   jumpPower: 2
   speed: 60
+  hitMask:
+    serializedVersion: 2
+    m_Bits: 55
+  bulletData: {fileID: 11400000, guid: 9c2dcd5eeca1db44680f0032678965d7, type: 2}
 --- !u!96 &4206962411481109669
 TrailRenderer:
   serializedVersion: 3
@@ -239,26 +242,3 @@ TrailRenderer:
   m_Autodestruct: 0
   m_Emitting: 1
   m_ApplyActiveColorSpace: 1
---- !u!136 &9041960595342789617
-CapsuleCollider:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 8839408248613827518}
-  m_Material: {fileID: 0}
-  m_IncludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_ExcludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_LayerOverridePriority: 0
-  m_IsTrigger: 1
-  m_ProvidesContacts: 0
-  m_Enabled: 1
-  serializedVersion: 2
-  m_Radius: 0.06
-  m_Height: 0.22
-  m_Direction: 2
-  m_Center: {x: 0, y: 0, z: 0}
