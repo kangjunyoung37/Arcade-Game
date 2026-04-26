@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using Cinemachine;
 using UnityEngine;
 using Random = UnityEngine.Random;
 
@@ -10,29 +11,22 @@ public class Character : MonoBehaviour
 {
     [Header("CrossHair")]
     public Crosshair crosshair;
-    
     public LayerMask groundLayer;
-    private CharacterController _characterControllercc;
-
+    
     [Header("Gravity")] 
     public float gravity = -15f;
     private float _velocityY;
-   
-    private bool _isAiming = false;
-    private Vector3 _moveDirection;
-    private float _rotateSpeed = 15f;
     
     [Header("Character Stat")]
-    [SerializeField]
     public float normalspeed = 8f;
+    public float runspeed = 12f;
+    private float _currentSpeed = 8f;
     public float aimingSpeed = 4f;
     
-
     [Header("Shoot Settings")]
     private float _lastFireTime;
     private bool _isCooldown = false;
-    public float CurrentSpread { get; private set; }
-    
+
     [Header("Shoot Test")]
     public Transform bulletSpawnPoint;
     public WeaponData currentWeaponData;
@@ -43,13 +37,32 @@ public class Character : MonoBehaviour
     public float aimCameraDistance = 4.0f;
     public float aimCameraSpeed = 5f;
 
+    [Header("Dodge Settings")]
+    public float dodgeSpeed = 15f;
+    public float dodgeDuration = 0.2f;
+    public float dodgeCooldown = 1f;
+    
+    //Component
     private HealthSystem _health;
     private MainCamera _mainCamera;
     private Camera mainCamera;
+    private CharacterController _characterControllercc;
+    private CinemachineImpulseSource _impulseSource;
+    
+    //Variable
+    private bool _isAiming = false;
+    private Vector3 _moveDirection;
+    private float _rotateSpeed = 15f;
+    private bool _isDodging = false;
+    private float _lastDodgeTime;
+    private bool _isRunning = false;
+    public float CurrentSpread { get; private set; }
+
     private void Awake()
     {
         _health = GetComponent<HealthSystem>();
         _characterControllercc = GetComponent<CharacterController>();
+        _impulseSource = GetComponent<CinemachineImpulseSource>();
         if (_health is not null)
         {
             _health.onDied += HandleDeath;
@@ -68,15 +81,24 @@ public class Character : MonoBehaviour
     
     private void Update()
     {
-        CharacterMovement();
-        _isAiming = Input.GetMouseButton(1);
+
+        Aiming();
+        Running();
         if (crosshair is not null)
         {
             crosshair.SetAiming(_isAiming);
         }
+        
         TryFire();
-        HandleAimAndCamera();
+        if (!_isDodging)
+        {
+            CharacterMovement();
+            HandleAimAndCamera();
+        }
         HandleSpreadRecovery();
+        Dodge();
+       
+   
     }
 
     private void OnDestroy()
@@ -87,7 +109,7 @@ public class Character : MonoBehaviour
         }
     }
 
-    void CharacterMovement()
+    private void CharacterMovement()
     {
         float h = Input.GetAxisRaw("Horizontal");
         float v = Input.GetAxisRaw("Vertical");
@@ -98,23 +120,21 @@ public class Character : MonoBehaviour
         camRight.y = 0f;
         camForward.Normalize();
         camRight.Normalize();
-        float characterSpeed = _isAiming ? aimingSpeed : normalspeed;
         _moveDirection = (camForward * v) + (camRight * h).normalized;
         if (_characterControllercc.isGrounded && _velocityY < 0)
         {
             _velocityY = -2f;
         }
         _velocityY += gravity * Time.deltaTime;
-        Vector3 finalMove = (_moveDirection * characterSpeed) + (Vector3.up * _velocityY);
+        Vector3 finalMove = (_moveDirection * _currentSpeed) + (Vector3.up * _velocityY);
         _characterControllercc.Move(finalMove* Time.deltaTime);
         
     }
-    void HandleAimAndCamera()
+    private void HandleAimAndCamera()
     {
         Vector3 targetLookDirection = Vector3.zero;
         Vector3 targetCamPos = transform.position; 
-
-
+        
         Ray ray = mainCamera.ScreenPointToRay(Input.mousePosition);
         if (Physics.Raycast(ray, out RaycastHit hit, 100f, groundLayer))
         {
@@ -128,7 +148,7 @@ public class Character : MonoBehaviour
             targetCamPos = transform.position + clampedDir;
         }
         
-        if(!_isAiming)
+        if(_isRunning)
             targetLookDirection = _moveDirection; 
         
         targetLookDirection.y = 0f; 
@@ -138,13 +158,15 @@ public class Character : MonoBehaviour
             transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, _rotateSpeed * Time.deltaTime);
         }
         
-        if (cameraTarget != null)
+        if (cameraTarget)
         {
             cameraTarget.position = Vector3.Lerp(cameraTarget.position, targetCamPos, Time.deltaTime * aimCameraSpeed);
         }
     }
 
-    private void HandleSpreadRecovery()
+    #region Fire Code
+
+     private void HandleSpreadRecovery()
     {
         if (Time.time > _lastFireTime + currentWeaponData.fireRate * 1.5f)
         {
@@ -154,7 +176,7 @@ public class Character : MonoBehaviour
     }
     private void TryFire()
     {
-        if (_isCooldown) return;
+        if (_isCooldown || _isRunning || _isDodging) return;
         switch (currentWeaponData.fireMode)
         {
             case FireMode.Single:
@@ -186,6 +208,7 @@ public class Character : MonoBehaviour
     private void Fire()
     {
         crosshair.AddSpread(CurrentSpread);
+        _impulseSource.GenerateImpulse();
         GameObject bullet = ObjectPoolManager.instance.GetGo("Bullet");
         float randowYaw = Random.Range(-CurrentSpread, CurrentSpread);
         Quaternion spreadRotation = Quaternion.Euler(0, randowYaw, 0);
@@ -219,6 +242,66 @@ public class Character : MonoBehaviour
         
         yield return new WaitForSeconds(currentWeaponData.burstPostDelay);
         _isCooldown = false;
+    }
+
+    #endregion
+   
+    
+    //Dodge
+    #region Dodge
+
+    private void Dodge()
+    {
+        if (Input.GetKeyDown(KeyCode.Space) && Time.time > _lastDodgeTime + dodgeCooldown && !_isDodging)
+        {
+            var dashDirection = (_moveDirection.sqrMagnitude > 0) ?  _moveDirection : transform.forward;
+            StartCoroutine(DodgeRoutine(dashDirection));
+        }
+        
+    }
+    private IEnumerator DodgeRoutine(Vector3 directrion)
+    {
+        _isDodging = true;
+        _health.isInvincible = true;
+        float startTime = Time.time;
+        while (Time.time < startTime + dodgeDuration)
+        {
+            transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.LookRotation(directrion), _rotateSpeed * Time.deltaTime);
+            _characterControllercc.Move(directrion * (dodgeSpeed * Time.deltaTime));
+            yield return null;
+        }
+        _isDodging = false;
+        _health.isInvincible = true;
+        _lastDodgeTime = Time.time;
+    }
+
+    #endregion
+
+    private void Running()
+    {
+        if (_isAiming) return;
+        
+        if (Input.GetButtonDown("Run"))
+        {
+            _currentSpeed = runspeed;
+            _isRunning = true;
+        }
+
+        if (Input.GetButtonUp("Run"))
+        {
+            _currentSpeed = normalspeed;
+            _isRunning = false;
+        }
+    }
+
+    private void Aiming()
+    {
+        _isAiming = Input.GetMouseButton(1);
+        if (_isAiming)
+        {
+            _isRunning = false;
+            _currentSpeed = aimingSpeed;
+        }
     }
     private void HandleDeath()
     {
