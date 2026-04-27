@@ -136,7 +136,7 @@ MonoBehaviour:
   speed: 60
   hitMask:
     serializedVersion: 2
-    m_Bits: 55
+    m_Bits: 1591
   bulletData: {fileID: 11400000, guid: 9c2dcd5eeca1db44680f0032678965d7, type: 2}
 --- !u!96 &4206962411481109669
 TrailRenderer:

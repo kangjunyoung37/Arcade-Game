@@ -13,12 +13,12 @@ public class PoolAble : MonoBehaviour
     public float jumpPower = 2.0f;
     private Sequence _currentScaleSequence;
     private Sequence _moveSequence;
-    public void ReleaseObject()
+
+    protected void ReleaseObject()
     {
         gameObject.transform.SetParent(null);
         gameObject.transform.position = Vector3.zero;
         gameObject.transform.rotation = Quaternion.Euler(0,0,0);
-        gameObject.transform.localScale = Vector3.one;
         Pool.Release(gameObject);
     }
     
@@ -101,4 +101,5 @@ public class PoolAble : MonoBehaviour
         }
 
     }
+    
 }
