@@ -311,22 +311,13 @@ public class Character : MonoBehaviour
             _isRunning = false;
             _currentSpeed = aimingSpeed;
         }
+        else
+        {
+            _currentSpeed = normalspeed;
+        }
     }
     private void HandleDeath()
     {
         Debug.Log("죽음");
-    }
-    private void OnDrawGizmos()
-    {
-        if (bulletSpawnPoint != null)
-        {
-            // 배출구 위치에서 오른쪽(빨간색) 방향으로 1미터짜리 빨간 선을 그어줍니다!
-            Gizmos.color = Color.red;
-            Gizmos.DrawRay(bulletSpawnPoint.position, bulletSpawnPoint.right * 1f);
-
-            // 배출구 위치에서 위쪽(초록색) 방향으로 1미터짜리 초록 선을 그어줍니다!
-            Gizmos.color = Color.green;
-            Gizmos.DrawRay(bulletSpawnPoint.position, bulletSpawnPoint.up * 1f);
-        }
     }
 }
