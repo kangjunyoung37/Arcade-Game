@@ -1212,7 +1212,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   viewRadius: 15
-  viewAngle: 90
+  viewAngle: 45
   targetMask:
     serializedVersion: 2
     m_Bits: 512
@@ -1337,7 +1337,7 @@ Camera:
   m_Depth: 0
   m_CullingMask:
     serializedVersion: 2
-    m_Bits: 2048
+    m_Bits: 3072
   m_RenderingPath: -1
   m_TargetTexture: {fileID: 8400000, guid: 9945723b94a2bfa45a384fdeec67a1f2, type: 2}
   m_TargetDisplay: 0
@@ -1585,7 +1585,7 @@ GameObject:
   - component: {fileID: 1301342301}
   - component: {fileID: 1301342300}
   - component: {fileID: 1301342299}
-  m_Layer: 0
+  m_Layer: 10
   m_Name: Cube (2)
   m_TagString: Untagged
   m_Icon: {fileID: 0}

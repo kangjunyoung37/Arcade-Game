@@ -92,12 +92,10 @@ public class FieldOfView : MonoBehaviour
             int vertexCount = viewPoints.Count + 1;
             Vector3[] vertices = new Vector3[vertexCount];
             int[] triangles = new int[(vertexCount - 2) * 3];
-    
+            
             Vector2[] uvs = new Vector2[vertexCount];
             uvs[0] = new Vector2(0.5f, 0.5f);
-            
             vertices[0] = Vector3.zero;
-            
             for (int i = 0; i < vertexCount - 1; ++i)
             {
                   vertices[i + 1] = transform.InverseTransformPoint(viewPoints[i]);
@@ -112,6 +110,7 @@ public class FieldOfView : MonoBehaviour
                         triangles[i * 3 + 1] = i + 1;
                         triangles[i * 3 + 2] = i + 2;
                   }
+                  
             }
 
             _viewMesh.Clear();
