@@ -5,7 +5,7 @@ using UnityEngine.Pool;
 
 public class ObjectPoolManager : MonoBehaviour
 {
-[System.Serializable]
+    [System.Serializable]
     private class ObjectInfo
     {
         public string objectName;
@@ -98,22 +98,4 @@ public class ObjectPoolManager : MonoBehaviour
         return _objectPoolDic[goName].Get();
     }
     
-    public T GetGo<T>(string goName) where T : Component
-    {
-        // 1. 기존에 만들어둔 함수를 통해 일단 GameObject를 꺼내옵니다.
-        GameObject go = GetGo(goName);
-
-        if (go == null) return null;
-
-        // 2. 꺼낸 게임오브젝트에서 원하는 컴포넌트를 찾아서 반환합니다.
-        T component = go.GetComponent<T>();
-
-        // (안전장치) 혹시라도 프리팹에 해당 스크립트를 안 붙여놨을 때를 대비한 경고문
-        if (component == null)
-        {
-            Debug.LogError($"[오브젝트 풀] {goName} 프리팹에 {typeof(T).Name} 컴포넌트가 안 붙어있습니다!");
-        }
-
-        return component;
-    }
 }

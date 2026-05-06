@@ -1,63 +1,115 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
+using Cinemachine;
 using UnityEngine;
-
+using Random = UnityEngine.Random;
 
 
 [RequireComponent(typeof(CharacterController))]
 public class Character : MonoBehaviour
 {
-    public FloatingJoystick joystick;
-    
+    [Header("CrossHair")]
+    public Crosshair crosshair;
     public LayerMask groundLayer;
-    private CharacterController _characterControllercc;
-    [SerializeField]
-    public MiningTool miningTool;
+    
+    [Header("Gravity")] 
+    public float gravity = -15f;
+    private float _velocityY;
+    
+    [Header("Character Stat")]
+    public float normalspeed = 8f;
+    public float runspeed = 12f;
+    private float _currentSpeed = 8f;
+    public float aimingSpeed = 4f;
+    
+    [Header("Shoot Settings")]
+    private float _lastFireTime;
+    private bool _isCooldown = false;
 
-    private bool _isAiming = false;
-    private Vector3 _moveDirection;
-    private float _rotateSpeed = 15f;
-    [Header("캐릭터 스탯")]
-    [SerializeField]
-    public float speed = 4f;
-    [Header("채광 기술")]
-    [SerializeField] public List<MiningTool> miningTools;
-    [Header("탐지된 광물 리스트")]
-    [SerializeField]
-    private List<Mineral> minerals = new List<Mineral>();
-    private MainCamera _mainCamera;
-    private Camera mainCamera;
-    private int _curMineMode = 0;
+    [Header("Shoot Test")]
+    public Transform bulletSpawnPoint;
+    public WeaponData currentWeaponData;
     
     //조준시 카메라 설정
     [Header("Camera Aim")] 
     public Transform cameraTarget;
     public float aimCameraDistance = 4.0f;
     public float aimCameraSpeed = 5f;
+
+    [Header("Dodge Settings")]
+    public float dodgeSpeed = 15f;
+    public float dodgeDuration = 0.2f;
+    public float dodgeCooldown = 1f;
     
-    [Header("화살표")]
-    public NavigationArrow navArrow;
+    //Component
+    private HealthSystem _health;
+    private MainCamera _mainCamera;
+    private Camera mainCamera;
+    private CharacterController _characterControllercc;
+    private CinemachineImpulseSource _impulseSource;
     
-    public Inventory inventory; 
+    //Variable
+    private bool _isAiming = false;
+    private Vector3 _moveDirection;
+    private float _rotateSpeed = 15f;
+    private bool _isDodging = false;
+    private float _lastDodgeTime;
+    private bool _isRunning = false;
+    public float CurrentSpread { get; private set; }
+
+    private void Awake()
+    {
+        _health = GetComponent<HealthSystem>();
+        _characterControllercc = GetComponent<CharacterController>();
+        _impulseSource = GetComponent<CinemachineImpulseSource>();
+        if (_health is not null)
+        {
+            _health.onDied += HandleDeath;
+        }
+    }
+
     private void Start()
     {
-        _characterControllercc = GetComponent<CharacterController>();
-        inventory = GetComponent<Inventory>();
         mainCamera = Camera.main;
         _mainCamera = mainCamera.GetComponent<MainCamera>();
-        ChangeMineTool(0);
+        if (currentWeaponData is not null)
+        {
+            CurrentSpread = currentWeaponData.baseSpread;
+        }
     }
     
-    void Update()
+    private void Update()
     {
-        CharacterMovement();
-        _isAiming = Input.GetMouseButton(0);
 
-        HandleAimAndCamera();
+        Aiming();
+        Running();
+        if (crosshair is not null)
+        {
+            crosshair.SetAiming(_isAiming);
+        }
         
+        TryFire();
+        if (!_isDodging)
+        {
+            CharacterMovement();
+            HandleAimAndCamera();
+        }
+        HandleSpreadRecovery();
+        Dodge();
+       
+   
     }
 
-    void CharacterMovement()
+    private void OnDestroy()
+    {
+        if (_health is not null)
+        {
+            _health.onDied -= HandleDeath;
+        }
+    }
+
+    private void CharacterMovement()
     {
         float h = Input.GetAxisRaw("Horizontal");
         float v = Input.GetAxisRaw("Vertical");
@@ -68,17 +120,21 @@ public class Character : MonoBehaviour
         camRight.y = 0f;
         camForward.Normalize();
         camRight.Normalize();
-        
         _moveDirection = (camForward * v) + (camRight * h).normalized;
-        _characterControllercc.Move(_moveDirection * (speed * Time.deltaTime));
+        if (_characterControllercc.isGrounded && _velocityY < 0)
+        {
+            _velocityY = -2f;
+        }
+        _velocityY += gravity * Time.deltaTime;
+        Vector3 finalMove = (_moveDirection * _currentSpeed) + (Vector3.up * _velocityY);
+        _characterControllercc.Move(finalMove* Time.deltaTime);
         
     }
-    void HandleAimAndCamera()
+    private void HandleAimAndCamera()
     {
         Vector3 targetLookDirection = Vector3.zero;
         Vector3 targetCamPos = transform.position; 
-
-
+        
         Ray ray = mainCamera.ScreenPointToRay(Input.mousePosition);
         if (Physics.Raycast(ray, out RaycastHit hit, 100f, groundLayer))
         {
@@ -92,9 +148,8 @@ public class Character : MonoBehaviour
             targetCamPos = transform.position + clampedDir;
         }
         
-        if(!_isAiming)
+        if(_isRunning)
             targetLookDirection = _moveDirection; 
-        
         
         targetLookDirection.y = 0f; 
         if (targetLookDirection.magnitude > 0.1f)
@@ -103,60 +158,166 @@ public class Character : MonoBehaviour
             transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, _rotateSpeed * Time.deltaTime);
         }
         
-        if (cameraTarget != null)
+        if (cameraTarget)
         {
             cameraTarget.position = Vector3.Lerp(cameraTarget.position, targetCamPos, Time.deltaTime * aimCameraSpeed);
         }
     }
 
-    public void AddMineral(Mineral mineral)
-    {
-        minerals.Add(mineral);
-    }
+    #region Fire Code
 
-    public void RemoveMineral(Mineral mineral)
+     private void HandleSpreadRecovery()
     {
-        if(minerals.Contains(mineral))
-            minerals.Remove(mineral);
-    }
-
-    //탐지된 광물 체크
-    public bool MineralCheck()
-    {
-        if (minerals.Count == 0 || !minerals[0].isAvailable)
-            return false;
-        return true;
-    }
-    
-    //광물 캐기
-    public void MiningWithTool()
-    {
-        if (!MineralCheck())
-            return;
-        minerals[0].Mine();
-        RemoveMineral(minerals[0]);
-        inventory.AddRock();
-        
-    }
-
-    public void ChangeMineTool(int num)
-    {
-        _curMineMode = num;
-        miningTool =  miningTools[num];
-        inventory.maxMineral = miningTool.maxMineral;
-    }
-    public void SwitchMineMode(bool switchBool)
-    {
-        if (_curMineMode == 2)
+        if (Time.time > _lastFireTime + currentWeaponData.fireRate * 1.5f)
         {
-            float targetY = switchBool ? 2.15f : 0.87f;
-            
-            Vector3 moveOffset = new Vector3(0, targetY - transform.position.y, 0);
-
-            _characterControllercc.Move(moveOffset);
+            CurrentSpread = Mathf.MoveTowards(CurrentSpread, currentWeaponData.baseSpread,
+                currentWeaponData.recoveryRate * Time.deltaTime);
         }
-        miningTool.gameObject.SetActive(switchBool);
+    }
+    private void TryFire()
+    {
+        if (_isCooldown || _isRunning || _isDodging) return;
+        switch (currentWeaponData.fireMode)
+        {
+            case FireMode.Single:
+                if (Input.GetMouseButtonDown(0))
+                {
+                    Fire();
+                    StartCoroutine(FireCooldown(currentWeaponData.singleFireDelay));
+                }
+                break;
+
+            case FireMode.Auto:
+                if (Input.GetMouseButton(0) && Time.time >= _lastFireTime + currentWeaponData.fireRate)
+                {
+                    Fire();
+                    _lastFireTime = Time.time;
+                }
+                break;
+
+            case FireMode.Burst:
+                if (Input.GetMouseButtonDown(0))
+                {
+                    StartCoroutine(BurstFireRoutine());
+                }
+                break;
+        }
+    }
+    
+    //Bullet Fire
+    private void Fire()
+    {
+        crosshair.AddSpread(CurrentSpread);
+        _impulseSource.GenerateImpulse();
+        GameObject casing = ObjectPoolManager.instance.GetGo("Casing");
+        GameObject bullet = ObjectPoolManager.instance.GetGo("Bullet");
+        //Test Casing
+        casing.transform.position = bulletSpawnPoint.position;
+        casing.transform.rotation = bulletSpawnPoint.rotation;
+        
+        var perfectDirection = (bulletSpawnPoint.right +  bulletSpawnPoint.up).normalized;
+        if (casing.TryGetComponent(out Casing casingComponent))
+            casingComponent.Eject(perfectDirection);
+        
+        float randowYaw = Random.Range(-CurrentSpread, CurrentSpread);
+        Quaternion spreadRotation = Quaternion.Euler(0, randowYaw, 0);
+        
+        bullet.transform.position = bulletSpawnPoint.position;
+        bullet.transform.rotation = bulletSpawnPoint.rotation * spreadRotation;
+        CurrentSpread += currentWeaponData.bloomPerShot;
+        CurrentSpread = Mathf.Clamp(CurrentSpread, currentWeaponData.baseSpread, currentWeaponData.maxSpread);
+        if (bullet.TryGetComponent(out Bullet b))
+        {
+            b.Init();
+        }
         
     }
     
+    private IEnumerator FireCooldown(float delay)
+    {
+        _isCooldown = true;
+        yield return new WaitForSeconds(delay);
+        _isCooldown = false;
+    }
+
+    private IEnumerator BurstFireRoutine()
+    {
+        _isCooldown = true; 
+        for (int i = 0; i < currentWeaponData.burstCount; i++)
+        {
+            Fire();
+            yield return new WaitForSeconds(currentWeaponData.fireRate);
+        }
+        
+        yield return new WaitForSeconds(currentWeaponData.burstPostDelay);
+        _isCooldown = false;
+    }
+
+    #endregion
+   
+    
+    //Dodge
+    #region Dodge
+
+    private void Dodge()
+    {
+        if (Input.GetKeyDown(KeyCode.Space) && Time.time > _lastDodgeTime + dodgeCooldown && !_isDodging)
+        {
+            var dashDirection = (_moveDirection.sqrMagnitude > 0) ?  _moveDirection : transform.forward;
+            StartCoroutine(DodgeRoutine(dashDirection));
+        }
+        
+    }
+    private IEnumerator DodgeRoutine(Vector3 directrion)
+    {
+        _isDodging = true;
+        _health.isInvincible = true;
+        float startTime = Time.time;
+        while (Time.time < startTime + dodgeDuration)
+        {
+            transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.LookRotation(directrion), _rotateSpeed * Time.deltaTime);
+            _characterControllercc.Move(directrion * (dodgeSpeed * Time.deltaTime));
+            yield return null;
+        }
+        _isDodging = false;
+        _health.isInvincible = true;
+        _lastDodgeTime = Time.time;
+    }
+
+    #endregion
+
+    private void Running()
+    {
+        if (_isAiming) return;
+        
+        if (Input.GetButtonDown("Run"))
+        {
+            _currentSpeed = runspeed;
+            _isRunning = true;
+        }
+
+        if (Input.GetButtonUp("Run"))
+        {
+            _currentSpeed = normalspeed;
+            _isRunning = false;
+        }
+    }
+
+    private void Aiming()
+    {
+        _isAiming = Input.GetMouseButton(1);
+        if (_isAiming)
+        {
+            _isRunning = false;
+            _currentSpeed = aimingSpeed;
+        }
+        else
+        {
+            _currentSpeed = normalspeed;
+        }
+    }
+    private void HandleDeath()
+    {
+        Debug.Log("죽음");
+    }
 }
