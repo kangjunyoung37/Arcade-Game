@@ -13,7 +13,7 @@ public class InventoryGrid : MonoBehaviour
 
    public Transform itemContainer;
    
-   private float step => cellSize / spacing;
+   private float step => cellSize + spacing;
 
    private int[] gridMask;
    private ItemDrag[,] itemGrid;
@@ -33,13 +33,14 @@ public class InventoryGrid : MonoBehaviour
 
    public Vector2Int GetIndexFromPosition(Vector2 localPosition)
    {
-      int x = Mathf.FloorToInt(localPosition.x / step);
-      int y = Mathf.FloorToInt(-localPosition.y / step);
+      int x = Mathf.RoundToInt(localPosition.x / step);
+      int y = Mathf.RoundToInt(-localPosition.y / step);
       return new Vector2Int(x, y);
    }
 
    public bool CanPlaceItem(int startX, int startY, int width, int height)
    {
+      Debug.Log(startX + ", " + startY);
       if (startX < 0 || startY < 0 || startX + width > gridWidth || startY + height > gridHeight)
          return false;
       int itemRowMask = (1 << width) - 1;
@@ -79,5 +80,5 @@ public class InventoryGrid : MonoBehaviour
          }
       }
    }
-   
+
 }
