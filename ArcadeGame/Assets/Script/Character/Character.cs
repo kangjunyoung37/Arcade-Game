@@ -97,8 +97,7 @@ public class Character : MonoBehaviour
         }
         HandleSpreadRecovery();
         Dodge();
-       
-   
+        RotateItem();
     }
 
     private void OnDestroy()
@@ -130,6 +129,7 @@ public class Character : MonoBehaviour
         _characterControllercc.Move(finalMove* Time.deltaTime);
         
     }
+
     private void HandleAimAndCamera()
     {
         Vector3 targetLookDirection = Vector3.zero;
@@ -316,6 +316,18 @@ public class Character : MonoBehaviour
             _currentSpeed = normalspeed;
         }
     }
+
+    private void RotateItem()
+    {
+        if (Input.GetKeyDown(KeyCode.R))
+        {
+            if (ItemDrag.CurrrentlyDraggedItem)
+            {
+                ItemDrag.CurrrentlyDraggedItem.RotateItem();
+            }
+        }
+    }
+
     private void HandleDeath()
     {
         Debug.Log("죽음");
