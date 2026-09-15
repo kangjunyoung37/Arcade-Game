@@ -29,23 +29,36 @@ public sealed class EnemyIdleState : IState
         _remainingIdleTime -= deltaTime;
         _remainingDetectionTime -= deltaTime;
 
-        if (_remainingDetectionTime <= 0f)
+        if (TryDetectPlayer())
         {
-            _remainingDetectionTime = _owner.DetectionInterval;
-
-            if (_owner.CanDetectPlayer())
-            {
-                IState alertState = _owner.AlertState;
-
-                if (alertState != null)
-                {
-                    _owner.ChangeState(alertState);
-                }
-
-                return;
-            }
+            return;
         }
+        TryStartPatrol();
+    }
 
+    private bool TryDetectPlayer()
+    {
+        if(_remainingDetectionTime > 0f)
+        {
+            return false;
+        }
+        _remainingDetectionTime = _owner.DetectionInterval;
+
+        if(!_owner.CanDetectPlayer())
+        {
+            return false;
+        }
+        IState alertState = _owner.AlertState;
+        if (alertState != null)
+        {
+            return false;
+        }
+        _owner.ChangeState(alertState);
+        return true;
+    }
+
+    private void TryStartPatrol()
+    {
         if (_remainingIdleTime > 0f)
         {
             return;
@@ -53,12 +66,12 @@ public sealed class EnemyIdleState : IState
 
         IState patrolState = _owner.PatrolState;
 
-        if (patrolState != null)
+        if (patrolState == null)
         {
-            _owner.ChangeState(patrolState);
+            return;
         }
+        _owner.ChangeState(patrolState);
     }
-
     public void Exit()
     {
     }

@@ -197,4 +197,17 @@ public sealed class EnemyController : MonoBehaviour
     {
         AlertState = alertState;
     }
+
+#if UNITY_EDITOR
+    private void OnValidate()
+    {
+        maxIdleDuration = Mathf.Max(
+            minIdleDuration,
+            maxIdleDuration);
+
+        _viewDotThreshold = Mathf.Cos(
+            viewAngle * 0.5f * Mathf.Deg2Rad);
+    }
+#endif
+
 }
