@@ -45,6 +45,12 @@ public sealed class EnemyController : MonoBehaviour
     public float MinIdleDuration => minIdleDuration;
     public float MaxIdleDuration => maxIdleDuration;
     public float DetectionInterval => detectionInterval;
+    public float PatrolStoppingDistance => patrolStoppingDistance;
+
+    [Header("Patrol")]
+    [SerializeField] private EnemyPatrolRoute patrolRoute;
+    [SerializeField, Min(0.05f)] private float patrolStoppingDistance = 0.5f;
+    private int _nextPatrolPointIndex;
 
     public IState PatrolState { get; private set; }
     public IState AlertState { get; private set; }
@@ -58,6 +64,7 @@ public sealed class EnemyController : MonoBehaviour
 
         _viewDotThreshold = Mathf.Cos(viewAngle * 0.5f * Mathf.Deg2Rad);
         IdleState = new EnemyIdleState(this);
+        PatrolState = new EnemyPatrolState(this);
     }
 
     private void Start()
@@ -188,9 +195,63 @@ public sealed class EnemyController : MonoBehaviour
 
         return dot >= _viewDotThreshold;
     }
-    public void RegisterPatrolState(IState patrolState)
+    // Patrol 관련 메서드
+    public bool TryGetNextPatrolDestination(out Vector3 destination)
     {
-        PatrolState = patrolState;
+        destination = default;
+
+        if (patrolRoute == null || patrolRoute.Count == 0)
+        {
+            return false;
+        }
+
+        int pointCount = patrolRoute.Count;
+        for(int i = 0; i < pointCount; i++)
+        {
+            int selectedIndex = _nextPatrolPointIndex;
+            _nextPatrolPointIndex = (_nextPatrolPointIndex + 1) % pointCount;
+            if(patrolRoute.TryGetPosition(selectedIndex, out destination))
+            {
+                return true;
+            }
+
+        }
+        return false;
+    }
+    //지정 목적지 이동 
+    public bool TryMoveTo(Vector3 destination, float stoppingDistance)
+    {
+        if(!_agent.isOnNavMesh)
+        {
+            return false;
+        }
+        _agent.stoppingDistance = Mathf.Max(0.05f, stoppingDistance);
+        _agent.isStopped = false;
+        return _agent.SetDestination(destination);
+    }
+
+    // 도착지 판정
+    public bool HasReachedDestination()
+    {
+        if(!_agent.isOnNavMesh || _agent.pathPending)
+        {
+            return false;
+        }
+        if(_agent.remainingDistance > _agent.stoppingDistance)
+        {
+            return false;
+        }
+        return !_agent.hasPath || _agent.velocity.sqrMagnitude < 0.01f;
+    }
+
+    //경로 실패 
+    public bool HasPathFailed()
+    {
+        if(!_agent.isOnNavMesh || _agent.pathPending)
+        {
+            return false;
+        }
+        return _agent.pathStatus != NavMeshPathStatus.PathComplete;
     }
 
     public void RegisterAlertState(IState alertState)
