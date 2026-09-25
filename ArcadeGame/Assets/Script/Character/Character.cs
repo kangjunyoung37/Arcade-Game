@@ -42,6 +42,21 @@ public class Character : MonoBehaviour
     public float dodgeDuration = 0.2f;
     public float dodgeCooldown = 1f;
     
+    [Header("AI Noise")]
+    [SerializeField, Min(0f)]
+    private float gunshotNoiseRadius = 30f;
+
+    [SerializeField, Min(0f)]
+    private float walkNoiseRadius = 6f;
+
+    [SerializeField, Min(0f)]
+    private float runNoiseRadius = 12f;
+
+    [SerializeField, Min(0.1f)]
+    private float footstepDistance = 1.5f;
+
+    private Vector3 _lastFootstepPosition;
+    private float _accumulatedFootstepDistance;
     //Component
     private HealthSystem _health;
     private MainCamera _mainCamera;
@@ -77,6 +92,7 @@ public class Character : MonoBehaviour
         {
             CurrentSpread = currentWeaponData.baseSpread;
         }
+        _lastFootstepPosition = transform.position;
     }
     
     private void Update()
@@ -98,6 +114,7 @@ public class Character : MonoBehaviour
         HandleSpreadRecovery();
         Dodge();
         RotateItem();
+        UpdateFootstepNoise();
     }
 
     private void OnDestroy()
@@ -207,6 +224,7 @@ public class Character : MonoBehaviour
     //Bullet Fire
     private void Fire()
     {
+        PlayerNoise.Emit( this,bulletSpawnPoint.position,gunshotNoiseRadius);
         crosshair.AddSpread(CurrentSpread);
         _impulseSource.GenerateImpulse();
         GameObject casing = ObjectPoolManager.instance.GetGo("Casing");
@@ -328,6 +346,35 @@ public class Character : MonoBehaviour
         }
     }
 
+    private void UpdateFootstepNoise()
+{
+    Vector3 currentPosition = transform.position;
+    Vector3 displacement = currentPosition - _lastFootstepPosition;
+    _lastFootstepPosition = currentPosition;
+
+    if (!_characterControllercc.isGrounded || _isDodging)
+    {
+        _accumulatedFootstepDistance = 0f;
+        return;
+    }
+
+    displacement.y = 0f;
+
+    _accumulatedFootstepDistance += displacement.magnitude;
+
+    if (_accumulatedFootstepDistance < footstepDistance)
+    {
+        return;
+    }
+
+    _accumulatedFootstepDistance %= footstepDistance;
+
+    float radius = _isRunning
+        ? runNoiseRadius
+        : walkNoiseRadius;
+
+    PlayerNoise.Emit(this, currentPosition, radius);
+}
     private void HandleDeath()
     {
         Debug.Log("죽음");

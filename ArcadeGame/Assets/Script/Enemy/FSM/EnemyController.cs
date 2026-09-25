@@ -52,6 +52,26 @@ public sealed class EnemyController : MonoBehaviour
     [SerializeField, Min(0.05f)] private float patrolStoppingDistance = 0.5f;
     private int _nextPatrolPointIndex;
 
+    [Header("Alert")]
+    [SerializeField, Min(0f)] private float alertReactionTime = 0.5f;
+    [SerializeField, Min(0.1f)] private float alertMemoryDuration = 3f;
+    [SerializeField, Min(0f)] private float alertTrunSpeed = 240f;
+
+    private const float FacingDirectionSqrEpsilon = 0.0001f;
+
+    private float _remainingPerceptionTime;
+    private bool _hasPendingNoise;
+    private Vector3 _pendingNoisePosition;
+
+    public bool CanSeePlayer { get; private set; }
+    public Vector3 LastKnownPlayerPosition { get; private set; }
+    public float LastStimulusTime { get; private set; }
+
+    public float AlertRectionTime => alertReactionTime;
+    public float AlertMemoryDuration => alertMemoryDuration;
+    public IState ChaseState { get; private set; }
+    public IState SearchState { get; private set; }
+
     public IState PatrolState { get; private set; }
     public IState AlertState { get; private set; }
 
@@ -65,6 +85,7 @@ public sealed class EnemyController : MonoBehaviour
         _viewDotThreshold = Mathf.Cos(viewAngle * 0.5f * Mathf.Deg2Rad);
         IdleState = new EnemyIdleState(this);
         PatrolState = new EnemyPatrolState(this);
+        AlertState = new EnemyAlertState(this);
     }
 
     private void Start()
@@ -75,6 +96,7 @@ public sealed class EnemyController : MonoBehaviour
 
     private void Update()
     {
+        UpdatePerception(Time.deltaTime);
         _stateMachine.Tick(Time.deltaTime);
     }
 
@@ -82,7 +104,19 @@ public sealed class EnemyController : MonoBehaviour
     {
         _stateMachine.Stop();
     }
+    private void OnEnable()
+    {
+        PlayerNoise.Emitted += HandlePlayerNoise;
+        _remainingPerceptionTime = 0f;
+    }
 
+    private void OnDisable()
+    {
+        PlayerNoise.Emitted -= HandlePlayerNoise;
+        _hasPendingNoise = false;
+        CanSeePlayer = false;
+    }
+    
     public void ChangeState(IState nextState)
     {
         _stateMachine.ChangeState(nextState);
@@ -259,6 +293,83 @@ public sealed class EnemyController : MonoBehaviour
         AlertState = alertState;
     }
 
+    private bool CanProcessAlertStimuli()
+    {
+        IState current = _stateMachine.CurrentState;
+        return current != null && (ReferenceEquals(current, IdleState) || ReferenceEquals(current, PatrolState) || ReferenceEquals(current, AlertState));
+    }
+    
+    private void HandlePlayerNoise(Character source, Vector3 position, float radius)
+    {
+        if(!CanProcessAlertStimuli())
+        {
+            return;
+        }
+        if(!TryResolvePlayerTarget() || source == null || source.transform != target)
+        {
+            return;
+        }
+        Vector3 difference = position - transform.position;
+        if(difference.sqrMagnitude > radius * radius)
+        {
+            return;
+        }
+        _pendingNoisePosition = position;
+        _hasPendingNoise = true;
+    }
+
+    private void UpdatePerception(float deltaTime)
+    {
+        if(!CanProcessAlertStimuli())
+        {
+            _hasPendingNoise = false;
+            CanSeePlayer = false;
+            return;
+        }
+        _remainingPerceptionTime -= deltaTime;
+        if(_remainingPerceptionTime > 0f && !_hasPendingNoise)
+        {
+            return;
+        }
+        _remainingPerceptionTime = detectionInterval;
+        CanSeePlayer = CanDetectPlayer();
+
+        bool perceivedSomething  = false;
+        if (CanSeePlayer)
+        {
+            LastKnownPlayerPosition = target.position;
+            perceivedSomething = true;
+        }
+        else if(_hasPendingNoise)
+        {
+            LastKnownPlayerPosition = _pendingNoisePosition;
+            perceivedSomething = true;  
+        }
+        _hasPendingNoise = false;
+        if(!perceivedSomething)
+        {
+            return;
+        }
+        LastStimulusTime = Time.time;
+        if(!_stateMachine.IsInState(AlertState))
+        {
+            _stateMachine.ChangeState(AlertState);
+        }
+    }
+    public void FaceLastKnownPlayerPosition(float deletaTime)
+    {
+        Vector3 direction = LastKnownPlayerPosition - transform.position;
+        direction.y = 0f;
+        if(direction.sqrMagnitude <= FacingDirectionSqrEpsilon)
+        {
+            return;
+        }
+        Quaternion targetRotation = Quaternion.LookRotation(direction);
+        transform.rotation = Quaternion.RotateTowards(
+            transform.rotation,
+            targetRotation,
+            alertTrunSpeed * deletaTime);
+    }
 #if UNITY_EDITOR
     private void OnValidate()
     {
