@@ -19,46 +19,12 @@ public sealed class EnemyIdleState : IState
         _remainingIdleTime = Random.Range(
             _owner.MinIdleDuration,
             _owner.MaxIdleDuration);
-
-        // Idle 진입 직후 바로 탐지
-        _remainingDetectionTime = 0f;
     }
 
     public void Tick(float deltaTime)
     {
-        _remainingIdleTime -= deltaTime;
-        _remainingDetectionTime -= deltaTime;
+      _remainingIdleTime -= deltaTime;
 
-        if (TryDetectPlayer())
-        {
-            return;
-        }
-        TryStartPatrol();
-    }
-
-    private bool TryDetectPlayer()
-    {
-        if(_remainingDetectionTime > 0f)
-        {
-            return false;
-        }
-        _remainingDetectionTime = _owner.DetectionInterval;
-
-        if(!_owner.CanDetectPlayer())
-        {
-            return false;
-        }
-        IState alertState = _owner.AlertState;
-        if (alertState != null)
-        {
-            return false;
-        }
-        _owner.ChangeState(alertState);
-        return true;
-    }
-
-    private void TryStartPatrol()
-    {
         if (_remainingIdleTime > 0f)
         {
             return;
@@ -66,12 +32,12 @@ public sealed class EnemyIdleState : IState
 
         IState patrolState = _owner.PatrolState;
 
-        if (patrolState == null)
+        if (patrolState != null)
         {
-            return;
+            _owner.ChangeState(patrolState);
         }
-        _owner.ChangeState(patrolState);
     }
+
     public void Exit()
     {
     }

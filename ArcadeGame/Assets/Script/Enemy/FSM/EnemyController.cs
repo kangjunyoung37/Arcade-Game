@@ -57,6 +57,27 @@ public sealed class EnemyController : MonoBehaviour
     [SerializeField, Min(0.1f)] private float alertMemoryDuration = 3f;
     [SerializeField, Min(0f)] private float alertTrunSpeed = 240f;
 
+    [Header("Chase")]
+    [SerializeField, Min(0.02f)] private float chasePathUpdateInterval = 0.2f;
+    [SerializeField, Min(0.1f)] private float chaseMemoryDuration = 3f;
+    [SerializeField, Min(0f)] private float investigationStoppingDistance = 0.5f;
+
+    [Header("Attack")]
+    [SerializeField, Min(0.1f)] private float attackRange = 8f;
+    private const float AttackApproachRatio = 0.8f;
+
+    public float ChasePathUpdateInterval => chasePathUpdateInterval;
+    public float ChaseMemoryDuration => chaseMemoryDuration;
+
+    public float ChaseStoppingDistance => CanSeePlayer ? attackRange * AttackApproachRatio : investigationStoppingDistance;
+
+    public bool HasTarget => target != null && target.gameObject.activeInHierarchy;
+    
+    public bool CanNaviagate => _agent != null && _agent.isActiveAndEnabled && _agent.isOnNavMesh;
+    public bool IsPathPendinng => CanNaviagate && _agent.pathPending;
+
+    public IState AttackState { get; private set; }
+
     private const float FacingDirectionSqrEpsilon = 0.0001f;
 
     private float _remainingPerceptionTime;
@@ -67,7 +88,7 @@ public sealed class EnemyController : MonoBehaviour
     public Vector3 LastKnownPlayerPosition { get; private set; }
     public float LastStimulusTime { get; private set; }
 
-    public float AlertRectionTime => alertReactionTime;
+    public float AlertReactionTime => alertReactionTime;
     public float AlertMemoryDuration => alertMemoryDuration;
     public IState ChaseState { get; private set; }
     public IState SearchState { get; private set; }
@@ -86,6 +107,8 @@ public sealed class EnemyController : MonoBehaviour
         IdleState = new EnemyIdleState(this);
         PatrolState = new EnemyPatrolState(this);
         AlertState = new EnemyAlertState(this);
+
+        ChaseState = new EnemyChaseState(this);
     }
 
     private void Start()
@@ -124,7 +147,7 @@ public sealed class EnemyController : MonoBehaviour
 
     public void StopMoving()
     {
-        if (!_agent.isOnNavMesh)
+        if (!CanNaviagate)
         {
             return;
         }
@@ -255,7 +278,7 @@ public sealed class EnemyController : MonoBehaviour
     //지정 목적지 이동 
     public bool TryMoveTo(Vector3 destination, float stoppingDistance)
     {
-        if(!_agent.isOnNavMesh)
+        if(!CanNaviagate)
         {
             return false;
         }
@@ -296,7 +319,7 @@ public sealed class EnemyController : MonoBehaviour
     private bool CanProcessAlertStimuli()
     {
         IState current = _stateMachine.CurrentState;
-        return current != null && (ReferenceEquals(current, IdleState) || ReferenceEquals(current, PatrolState) || ReferenceEquals(current, AlertState));
+        return current != null && (ReferenceEquals(current, IdleState) || ReferenceEquals(current, PatrolState) || ReferenceEquals(current, AlertState) || ReferenceEquals(current, ChaseState)||ReferenceEquals(current, SearchState) || ReferenceEquals(current, AttackState));
     }
     
     private void HandlePlayerNoise(Character source, Vector3 position, float radius)
@@ -351,12 +374,12 @@ public sealed class EnemyController : MonoBehaviour
             return;
         }
         LastStimulusTime = Time.time;
-        if(!_stateMachine.IsInState(AlertState))
+        if(_stateMachine.IsInState(IdleState) || _stateMachine.IsInState(PatrolState))
         {
             _stateMachine.ChangeState(AlertState);
         }
     }
-    public void FaceLastKnownPlayerPosition(float deletaTime)
+    public void FaceLastKnownPosition(float deletaTime)
     {
         Vector3 direction = LastKnownPlayerPosition - transform.position;
         direction.y = 0f;
@@ -370,6 +393,17 @@ public sealed class EnemyController : MonoBehaviour
             targetRotation,
             alertTrunSpeed * deletaTime);
     }
+    public bool IsTargetInAttackRange()
+    {
+        if(!HasTarget || !CanSeePlayer)
+        {
+            return false;
+        }
+        Vector3 difference = target.position - transform.position;
+
+        return difference.sqrMagnitude <= attackRange * attackRange;
+    }
+
 #if UNITY_EDITOR
     private void OnValidate()
     {

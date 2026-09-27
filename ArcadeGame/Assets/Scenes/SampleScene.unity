@@ -13039,6 +13039,10 @@ MonoBehaviour:
   dodgeSpeed: 15
   dodgeDuration: 0.2
   dodgeCooldown: 1
+  gunshotNoiseRadius: 30
+  walkNoiseRadius: 6
+  runNoiseRadius: 12
+  footstepDistance: 1.5
 --- !u!114 &1741318434
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -15436,6 +15440,13 @@ MonoBehaviour:
   viewAngle: 120
   patrolRoute: {fileID: 1824221935}
   patrolStoppingDistance: 0.5
+  alertReactionTime: 0.5
+  alertMemoryDuration: 3
+  alertTrunSpeed: 240
+  chasePathUpdateInterval: 0.2
+  chaseMemoryDuration: 3
+  investigationStoppingDistance: 0.5
+  attackRange: 8
 --- !u!195 &2039950121
 NavMeshAgent:
   m_ObjectHideFlags: 0
