@@ -83,7 +83,7 @@ public sealed class EnemyChaseState : IState
 
     private void StopRequestedMovement()
     {
-        if(_hasMoveRequest)
+        if(!_hasMoveRequest)
         {
             return;
         }

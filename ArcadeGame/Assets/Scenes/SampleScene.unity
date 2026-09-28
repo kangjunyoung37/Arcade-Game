@@ -15432,7 +15432,7 @@ MonoBehaviour:
   detectionRange: 15
   sightBlockingMask:
     serializedVersion: 2
-    m_Bits: 0
+    m_Bits: 1024
   eyePoint: {fileID: 1139044070}
   target: {fileID: 0}
   fallbackEyeHeight: 1.5

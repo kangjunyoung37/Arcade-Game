@@ -1,3 +1,4 @@
+using System;
 using UnityEngine;
 using UnityEngine.AI;
 
@@ -64,6 +65,13 @@ public sealed class EnemyController : MonoBehaviour
 
     [Header("Attack")]
     [SerializeField, Min(0.1f)] private float attackRange = 8f;
+    [SerializeField] float attackInterval = 0.5f;
+    [SerializeField, Min(0f)] private float attackRangeBuffer = 1f;
+    [SerializeField, Range(0f, 90f)] private float attackAimTolerance = 10f;
+    private float _attackAimDotThreshold;
+    public float AttackInterval =>attackInterval;
+    public event Action<Vector3> Attackrequested;
+
     private const float AttackApproachRatio = 0.8f;
 
     public float ChasePathUpdateInterval => chasePathUpdateInterval;
@@ -104,11 +112,12 @@ public sealed class EnemyController : MonoBehaviour
         _stateMachine = new StateMachine();
 
         _viewDotThreshold = Mathf.Cos(viewAngle * 0.5f * Mathf.Deg2Rad);
+        _attackAimDotThreshold = Mathf.Cos(attackAimTolerance * Mathf.Deg2Rad);
         IdleState = new EnemyIdleState(this);
         PatrolState = new EnemyPatrolState(this);
         AlertState = new EnemyAlertState(this);
-
         ChaseState = new EnemyChaseState(this);
+
     }
 
     private void Start()
@@ -404,15 +413,53 @@ public sealed class EnemyController : MonoBehaviour
         return difference.sqrMagnitude <= attackRange * attackRange;
     }
 
+    public bool IsTargetWithinAttackHoldRange()
+    {
+        if(!HasTarget)
+        {
+            return false;
+        }
+        float holdRange = attackRange + attackRangeBuffer;
+        Vector3 difference = target.position - transform.position;
+        return difference.sqrMagnitude <= holdRange * holdRange;
+    }
+    public bool TryRequestAttack()
+    {
+        Action<Vector3> handler = Attackrequested;
+        if(handler == null || !HasTarget || !CanSeePlayer || !IsTargetWithinAttackHoldRange())
+        {
+            return false;
+        }
+        Vector3 toTarget = target.position - transform.position;
+        toTarget.y = 0f;
+        if(toTarget.sqrMagnitude > FacingDirectionSqrEpsilon)
+        {
+            Vector3 forward = transform.forward;
+            forward.y = 0f;
+            if(forward.sqrMagnitude <= FacingDirectionSqrEpsilon)
+            {
+                return false;
+            }
+            float facingDot = Vector3.Dot(forward.normalized, toTarget.normalized);
+            if(facingDot < _attackAimDotThreshold)
+            {
+                return false;
+            }
+        }
+        if (!CanDetectPlayer())
+        {
+            return false;
+        }
+        Vector3 aimPosition = target.position + Vector3.up * targetAimHeight;
+        handler.Invoke(aimPosition);
+        return true;
+    }
 #if UNITY_EDITOR
     private void OnValidate()
     {
-        maxIdleDuration = Mathf.Max(
-            minIdleDuration,
-            maxIdleDuration);
-
-        _viewDotThreshold = Mathf.Cos(
-            viewAngle * 0.5f * Mathf.Deg2Rad);
+        maxIdleDuration = Mathf.Max(minIdleDuration, maxIdleDuration);
+        _viewDotThreshold = Mathf.Cos(viewAngle * 0.5f * Mathf.Deg2Rad);
+        _attackAimDotThreshold = Mathf.Cos(attackAimTolerance * Mathf.Deg2Rad);
     }
 #endif
 
