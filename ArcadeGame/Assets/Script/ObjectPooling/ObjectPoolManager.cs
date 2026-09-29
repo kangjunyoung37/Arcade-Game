@@ -14,6 +14,7 @@ public class ObjectPoolManager : MonoBehaviour
     }
     public static ObjectPoolManager instance;
     
+    private readonly Dictionary<GameObject, Bullet> _bulletCache = new Dictionary<GameObject, Bullet>();
     public bool IsReady { get; private set; }
     [SerializeField] private ObjectInfo[] objectInfos;
     private string _objectName;
@@ -65,8 +66,15 @@ public class ObjectPoolManager : MonoBehaviour
     
     private GameObject CreatePooledItem()
     {
-        GameObject poolGo = Instantiate(_goDic[_objectName]);
-        poolGo.GetComponent<PoolAble>().Pool = _objectPoolDic[_objectName];
+        string poolKey = _objectName;
+
+        GameObject poolGo = Instantiate(_goDic[poolKey]);
+        poolGo.GetComponent<PoolAble>().Pool = _objectPoolDic[poolKey];
+
+        if (poolGo.TryGetComponent(out Bullet bullet))
+        {
+            _bulletCache.Add(poolGo, bullet);
+        }
         return poolGo;
     }
     

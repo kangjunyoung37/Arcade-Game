@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.AI;
 
@@ -68,9 +69,11 @@ public sealed class EnemyController : MonoBehaviour
     [SerializeField] float attackInterval = 0.5f;
     [SerializeField, Min(0f)] private float attackRangeBuffer = 1f;
     [SerializeField, Range(0f, 90f)] private float attackAimTolerance = 10f;
+
+    private readonly Dictionary<GameObject, Bullet> _bulletCache = new Dictionary<GameObject, Bullet>();
     private float _attackAimDotThreshold;
     public float AttackInterval =>attackInterval;
-    public event Action<Vector3> Attackrequested;
+    public event Action<Vector3> AttackRequested;
 
     private const float AttackApproachRatio = 0.8f;
 
@@ -117,6 +120,7 @@ public sealed class EnemyController : MonoBehaviour
         PatrolState = new EnemyPatrolState(this);
         AlertState = new EnemyAlertState(this);
         ChaseState = new EnemyChaseState(this);
+        AttackState = new EnemyAttackState(this);
 
     }
 
