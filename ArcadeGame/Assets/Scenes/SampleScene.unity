@@ -4313,6 +4313,9 @@ MonoBehaviour:
   - objectName: Casing
     prefab: {fileID: 6656562421845054976, guid: e076454540d9a5743a7532219170007b, type: 3}
     count: 30
+  - objectName: EnemyBullet
+    prefab: {fileID: 8839408248613827518, guid: 27c70e668993a2c48900ee4c714a05e9, type: 3}
+    count: 30
 --- !u!4 &580647005
 Transform:
   m_ObjectHideFlags: 0
@@ -7817,6 +7820,37 @@ LightingSettings:
   m_PVRTiledBaking: 0
   m_NumRaysToShootPerTexel: -1
   m_RespectSceneVisibilityWhenBakingGI: 0
+--- !u!1 &1126691806
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1126691807}
+  m_Layer: 9
+  m_Name: EnemyWeapon
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &1126691807
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1126691806}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0.655, y: 0.224, z: -0.248}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 2039950117}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1130841388
 GameObject:
   m_ObjectHideFlags: 0
@@ -12909,6 +12943,7 @@ GameObject:
   - component: {fileID: 1741318433}
   - component: {fileID: 1741318434}
   - component: {fileID: 1741318435}
+  - component: {fileID: 1741318436}
   m_Layer: 7
   m_Name: Character
   m_TagString: Player
@@ -13110,6 +13145,19 @@ MonoBehaviour:
     m_DissipationDistance: 100
     m_PropagationSpeed: 343
   m_DefaultVelocity: {x: 0.04, y: 0.04, z: 0.02}
+--- !u!114 &1741318436
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1741318427}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f2cc8f0a3522a2d4693e782e5d47cbff, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  surfaceType: 1
 --- !u!1 &1753942997
 GameObject:
   m_ObjectHideFlags: 0
@@ -15279,6 +15327,7 @@ GameObject:
   - component: {fileID: 2039950119}
   - component: {fileID: 2039950121}
   - component: {fileID: 2039950120}
+  - component: {fileID: 2039950122}
   m_Layer: 9
   m_Name: DommyEnemy
   m_TagString: Untagged
@@ -15387,6 +15436,7 @@ Transform:
   m_ConstrainProportionsScale: 0
   m_Children:
   - {fileID: 1139044070}
+  - {fileID: 1126691807}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!114 &2039950118
@@ -15436,7 +15486,7 @@ MonoBehaviour:
   eyePoint: {fileID: 1139044070}
   target: {fileID: 0}
   fallbackEyeHeight: 1.5
-  targetAimHeight: 1
+  targetAimHeight: 0
   viewAngle: 120
   patrolRoute: {fileID: 1824221935}
   patrolStoppingDistance: 0.5
@@ -15447,6 +15497,9 @@ MonoBehaviour:
   chaseMemoryDuration: 3
   investigationStoppingDistance: 0.5
   attackRange: 8
+  attackInterval: 0.5
+  attackRangeBuffer: 1
+  attackAimTolerance: 10
 --- !u!195 &2039950121
 NavMeshAgent:
   m_ObjectHideFlags: 0
@@ -15469,6 +15522,20 @@ NavMeshAgent:
   m_BaseOffset: 1
   m_WalkableMask: 4294967295
   m_ObstacleAvoidanceType: 4
+--- !u!114 &2039950122
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2039950112}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ea445d5dd273c3342b6bad4ec8f7a9d1, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  muzzle: {fileID: 1126691807}
+  bulletPoolKey: EnemyBullet
 --- !u!1 &2056923189
 GameObject:
   m_ObjectHideFlags: 0

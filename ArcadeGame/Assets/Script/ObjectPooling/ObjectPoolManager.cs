@@ -78,6 +78,24 @@ public class ObjectPoolManager : MonoBehaviour
         return poolGo;
     }
     
+    public Bullet GetBullet(string poolKey)
+    {
+        if(!IsReady || string.IsNullOrEmpty(poolKey))
+        {
+            return null;
+        }
+        GameObject pooledObject = GetGo(poolKey);
+        if(pooledObject == null)
+        {
+            return null;
+        }
+        if(_bulletCache.TryGetValue(pooledObject, out Bullet bullet) && bullet != null)
+        {
+            return bullet;
+        }
+        _objectPoolDic[poolKey].Release(pooledObject);
+        return null;
+    }
     private void OnTakeFromPool(GameObject poolGo)
     {
         poolGo.SetActive(true);
@@ -90,6 +108,11 @@ public class ObjectPoolManager : MonoBehaviour
     
     private void OnDestroyPoolObject(GameObject poolGo)
     {
+        if(poolGo == null)
+        {
+            return;
+        }
+        _bulletCache.Remove(poolGo);
         Destroy(poolGo);
     }
 

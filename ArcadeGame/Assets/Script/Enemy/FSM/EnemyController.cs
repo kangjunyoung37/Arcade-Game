@@ -70,7 +70,6 @@ public sealed class EnemyController : MonoBehaviour
     [SerializeField, Min(0f)] private float attackRangeBuffer = 1f;
     [SerializeField, Range(0f, 90f)] private float attackAimTolerance = 10f;
 
-    private readonly Dictionary<GameObject, Bullet> _bulletCache = new Dictionary<GameObject, Bullet>();
     private float _attackAimDotThreshold;
     public float AttackInterval =>attackInterval;
     public event Action<Vector3> AttackRequested;
@@ -429,7 +428,7 @@ public sealed class EnemyController : MonoBehaviour
     }
     public bool TryRequestAttack()
     {
-        Action<Vector3> handler = Attackrequested;
+        Action<Vector3> handler = AttackRequested;
         if(handler == null || !HasTarget || !CanSeePlayer || !IsTargetWithinAttackHoldRange())
         {
             return false;

@@ -1,7 +1,4 @@
-using System;
 using System.Collections;
-using System.Collections.Generic;
-using Unity.VisualScripting;
 using UnityEngine;
 
 public class Bullet : PoolAble , IUpdateable
@@ -15,6 +12,13 @@ public class Bullet : PoolAble , IUpdateable
     private MeshRenderer _meshRenderer;
     private Vector3 _previousPosition;
     private bool _isDead = false;
+    [SerializeField, Min(0.01f)]
+    private float fallbackLifetime = 5f;
+
+    private float _remainingLifetime;
+    private float _remainingReturnDelay;
+    private GameManager _registeredManager;
+
     private void Awake()
     {
         _trail = GetComponent<TrailRenderer>();
@@ -24,21 +28,45 @@ public class Bullet : PoolAble , IUpdateable
 
     private void OnEnable()
     {
-        _previousPosition = transform.position;
-        GameManager.Instance.AddBullet(this);
+        _isDead = true;
+        _remainingReturnDelay = float.PositiveInfinity;
     }
     private void OnDisable()
     {
-        _trail.emitting = false;
-        GameManager.Instance.RemoveBullet(this);
+        if(_trail != null)
+        {
+            _trail.emitting = false;
+        }
+        if(_registeredManager != null)
+        {
+            _registeredManager.RemoveBullet(this);
+            _registeredManager = null;
+        }
     }
     
     public void OnTick(float deltaTime)
     {
-        if (_isDead) return;
+        if(_isDead)
+        {
+            _remainingReturnDelay -= deltaTime;
+            if(_remainingReturnDelay <= 0f)
+            {
+                ReleaseObject();
+            }
+            return;
+        }
+        
+        _remainingLifetime -= deltaTime;
+        if(_remainingLifetime <= 0f)
+        {
+            ReleaseObject();
+            return;
+        }
         HitCheck(deltaTime);
-        if(!_isDead)
+        if (!_isDead)
+        {
             BulletMove(deltaTime);
+        }
     }
 
     private void BulletMove(float deltaTime)
@@ -49,10 +77,29 @@ public class Bullet : PoolAble , IUpdateable
 
     public void Init()
     { 
-        _trail.emitting = true;
-        _trail.Clear();
+        GameManager manager = GameManager.Instance;
+        if(manager == null || bulletData == null)
+        {
+            ReleaseObject();
+            return;
+        }
+        _previousPosition = transform.position;
+
+        _remainingLifetime = bulletData.lifetime > 0f ? bulletData.lifetime : fallbackLifetime;
+        _remainingReturnDelay = 0f;
         _isDead = false;
-        _meshRenderer.enabled = true;
+        if(_trail != null)
+        {
+            _trail.Clear();
+            _trail.emitting = true;
+        }
+        if(_meshRenderer != null)
+        {
+            _meshRenderer.enabled = true;
+        }
+        _registeredManager = manager;
+        _registeredManager.AddBullet(this);
+
     }
 
     private void HitCheck(float deltaTime)
@@ -71,12 +118,15 @@ public class Bullet : PoolAble , IUpdateable
                 healthSystem.TakeDamage(damageInfo);
             }
             Spawn_VFX(hit);
-            _isDead = true;
-            _trail.emitting = false;
-            _meshRenderer.enabled = false;
-            transform.position = hit.point;
             
-            StartCoroutine(DelayDisable(_trail.time));
+            _isDead = true;
+            transform.position = hit.point;
+            if(_trail != null)
+                _trail.emitting = false;
+            if(_meshRenderer != null)
+                _meshRenderer.enabled = false;
+            
+            _remainingReturnDelay = _trail != null ? _trail.time : 0f;    
         }
     }
 
