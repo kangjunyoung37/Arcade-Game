@@ -70,6 +70,20 @@ public sealed class EnemyController : MonoBehaviour
     [SerializeField, Min(0f)] private float attackRangeBuffer = 1f;
     [SerializeField, Range(0f, 90f)] private float attackAimTolerance = 10f;
 
+    [Header("Search")]
+    [SerializeField, Min(0.1f)] private float searchMoveTimeout = 6f;
+    [SerializeField, Min(0.1f)] private float searchLookDuration = 4f;
+    [SerializeField, Min(0.1f)] private float searchTurnSpeed = 90f;
+    [SerializeField, Min(0.1f)] private float serachStoppingDistance = 0.5f;
+    [SerializeField, Min(0.1f)] private float serachChaseRetryDelay = 1f;
+
+    public float SearchMoveTimeout => searchMoveTimeout;
+    public float SearchLookDuration => searchLookDuration;
+    public float SearchTurnSpeed => searchTurnSpeed;
+    public float SearchStoppingDistance => serachStoppingDistance;
+    public float SearchChaseRetryDelay => serachChaseRetryDelay;
+
+
     private float _attackAimDotThreshold;
     public float AttackInterval =>attackInterval;
     public event Action<Vector3> AttackRequested;
@@ -107,6 +121,18 @@ public sealed class EnemyController : MonoBehaviour
     public IState AlertState { get; private set; }
 
     public EnemyIdleState IdleState { get; private set; }
+
+    public bool AgentUpdatesRotation
+    {
+        get => _agent != null && _agent.updateRotation;
+        set
+        {
+            if(_agent != null)
+            {
+                _agent.updateRotation = value;
+            }
+        }
+    }
 
     private void Awake()
     {
