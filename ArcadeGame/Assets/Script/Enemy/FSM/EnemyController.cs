@@ -146,6 +146,7 @@ public sealed class EnemyController : MonoBehaviour
         AlertState = new EnemyAlertState(this);
         ChaseState = new EnemyChaseState(this);
         AttackState = new EnemyAttackState(this);
+        SearchState = new EnemySearchState(this);
 
     }
 
