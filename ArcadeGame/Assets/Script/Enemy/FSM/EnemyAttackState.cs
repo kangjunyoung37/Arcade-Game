@@ -7,6 +7,8 @@ public sealed class EnemyAttackState : IState
 {
     private readonly EnemyController _owner;
 
+    private int _shotsInBurst;
+
     private float _nextAttackTime;
 
     public EnemyAttackState(EnemyController owner)
@@ -17,6 +19,7 @@ public sealed class EnemyAttackState : IState
     public void Enter()
     {
         _owner.StopMoving();
+        _shotsInBurst = 0;
     }
     public void Tick(float deltaTime)
     {
@@ -42,14 +45,30 @@ public sealed class EnemyAttackState : IState
             return;
         }
 
-        if (_owner.TryRequestAttack())
+        if (!_owner.TryRequestAttack())
         {
-            _nextAttackTime = Time.time + _owner.AttackInterval;
+            return;
         }
+        RecordShotRequest();
     }
     public void Exit()
     {
-        
+        if(_shotsInBurst > 0)
+        {
+            _nextAttackTime = Mathf.Max(_nextAttackTime, Time.time + _owner.BurstCooldown);
+        }
+        _shotsInBurst = 0;
+    }
+    private void RecordShotRequest()
+    {
+        _shotsInBurst++;
+        if (_shotsInBurst >= _owner.BurstCount)
+        {
+            _shotsInBurst = 0;
+            _nextAttackTime = Time.time + _owner.BurstCooldown;
+            return;
+        }
+        _nextAttackTime = Time.time + _owner.AttackInterval;
     }
 
 }

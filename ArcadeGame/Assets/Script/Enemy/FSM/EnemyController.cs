@@ -69,6 +69,8 @@ public sealed class EnemyController : MonoBehaviour
     [SerializeField] float attackInterval = 0.5f;
     [SerializeField, Min(0f)] private float attackRangeBuffer = 1f;
     [SerializeField, Range(0f, 90f)] private float attackAimTolerance = 10f;
+    [SerializeField, Min(1)] private int burstCount =3;
+    [SerializeField, Min(0.1f)] private float burstCooldown = 1f;
 
     [Header("Search")]
     [SerializeField, Min(0.1f)] private float searchMoveTimeout = 6f;
@@ -83,6 +85,8 @@ public sealed class EnemyController : MonoBehaviour
     public float SearchStoppingDistance => serachStoppingDistance;
     public float SearchChaseRetryDelay => serachChaseRetryDelay;
 
+    public int BurstCount => burstCount;
+    public float BurstCooldown => burstCooldown;
 
     private float _attackAimDotThreshold;
     public float AttackInterval =>attackInterval;
