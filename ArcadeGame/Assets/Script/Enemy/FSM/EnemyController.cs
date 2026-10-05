@@ -39,11 +39,6 @@ public sealed class EnemyController : MonoBehaviour
     [SerializeField, Range(0f, 360f)]
     private float viewAngle = 120f;
 
-    private float _viewDotThreshold;
-
-    private NavMeshAgent _agent;
-    private StateMachine _stateMachine;
-
     public float MinIdleDuration => minIdleDuration;
     public float MaxIdleDuration => maxIdleDuration;
     public float DetectionInterval => detectionInterval;
@@ -66,33 +61,34 @@ public sealed class EnemyController : MonoBehaviour
 
     [Header("Attack")]
     [SerializeField, Min(0.1f)] private float attackRange = 8f;
-    [SerializeField] float attackInterval = 0.5f;
     [SerializeField, Min(0f)] private float attackRangeBuffer = 1f;
     [SerializeField, Range(0f, 90f)] private float attackAimTolerance = 10f;
-    [SerializeField, Min(1)] private int burstCount =3;
-    [SerializeField, Min(0.1f)] private float burstCooldown = 1f;
 
     [Header("Search")]
     [SerializeField, Min(0.1f)] private float searchMoveTimeout = 6f;
     [SerializeField, Min(0.1f)] private float searchLookDuration = 4f;
     [SerializeField, Min(0.1f)] private float searchTurnSpeed = 90f;
-    [SerializeField, Min(0.1f)] private float serachStoppingDistance = 0.5f;
-    [SerializeField, Min(0.1f)] private float serachChaseRetryDelay = 1f;
+    [SerializeField, Min(0.1f)] private float searchStoppingDistance = 0.5f;
+    [SerializeField, Min(0.1f)] private float searchChaseRetryDelay = 1f;
+
+    private float _viewDotThreshold;
+    private NavMeshAgent _agent;
+    private StateMachine _stateMachine;
+    private float _attackAimDotThreshold;
+    public event Action<Vector3> AttackRequested;
+    private const float AttackApproachRatio = 0.8f;
+    private const float FacingDirectionSqrEpsilon = 0.0001f;
+    private float _remainingPerceptionTime;
+    private bool _hasPendingNoise;
+    private Vector3 _pendingNoisePosition;
+    private EnemyWeapon _weapon;
+    
 
     public float SearchMoveTimeout => searchMoveTimeout;
     public float SearchLookDuration => searchLookDuration;
     public float SearchTurnSpeed => searchTurnSpeed;
-    public float SearchStoppingDistance => serachStoppingDistance;
-    public float SearchChaseRetryDelay => serachChaseRetryDelay;
-
-    public int BurstCount => burstCount;
-    public float BurstCooldown => burstCooldown;
-
-    private float _attackAimDotThreshold;
-    public float AttackInterval =>attackInterval;
-    public event Action<Vector3> AttackRequested;
-
-    private const float AttackApproachRatio = 0.8f;
+    public float SearchStoppingDistance => searchStoppingDistance;
+    public float SearchChaseRetryDelay => searchChaseRetryDelay;
 
     public float ChasePathUpdateInterval => chasePathUpdateInterval;
     public float ChaseMemoryDuration => chaseMemoryDuration;
@@ -106,11 +102,6 @@ public sealed class EnemyController : MonoBehaviour
 
     public IState AttackState { get; private set; }
 
-    private const float FacingDirectionSqrEpsilon = 0.0001f;
-
-    private float _remainingPerceptionTime;
-    private bool _hasPendingNoise;
-    private Vector3 _pendingNoisePosition;
 
     public bool CanSeePlayer { get; private set; }
     public Vector3 LastKnownPlayerPosition { get; private set; }
@@ -126,6 +117,35 @@ public sealed class EnemyController : MonoBehaviour
 
     public EnemyIdleState IdleState { get; private set; }
 
+    private WeaponData EquippedWeaponData => _weapon != null ? _weapon.Data : null;
+
+    public bool HasWeaponData => EquippedWeaponData != null;
+    public int BurstCount
+    {
+        get
+        {
+            WeaponData data = EquippedWeaponData;
+            return data != null ? data.ShotsPerCycle : 1;
+        }
+    }
+
+    public float AttackInterval
+    {
+        get
+        {
+            WeaponData data = EquippedWeaponData;
+            return data != null ? data.ShotInterval : WeaponData.MinimumShotInterval;
+        }
+    }
+
+    public float BurstCooldown
+    {
+        get
+        {
+            WeaponData data = EquippedWeaponData;
+            return data != null ? data.CycleCooldown : WeaponData.MinimumShotInterval;
+        }
+    }
     public bool AgentUpdatesRotation
     {
         get => _agent != null && _agent.updateRotation;
@@ -151,6 +171,7 @@ public sealed class EnemyController : MonoBehaviour
         ChaseState = new EnemyChaseState(this);
         AttackState = new EnemyAttackState(this);
         SearchState = new EnemySearchState(this);
+        TryGetComponent(out _weapon);
 
     }
 
@@ -459,6 +480,10 @@ public sealed class EnemyController : MonoBehaviour
     }
     public bool TryRequestAttack()
     {
+        if (!HasWeaponData)
+        {
+            return false;
+        }
         Action<Vector3> handler = AttackRequested;
         if(handler == null || !HasTarget || !CanSeePlayer || !IsTargetWithinAttackHoldRange())
         {

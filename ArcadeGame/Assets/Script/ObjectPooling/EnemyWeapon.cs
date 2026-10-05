@@ -11,11 +11,17 @@ public sealed class EnemyWeapon : MonoBehaviour
     [Header("References")]
     [SerializeField] private Transform muzzle;
 
+    [Header("Weapon Settings")]
+    [SerializeField] private WeaponData weaponData;
+
+
     [Header("Projectile")]
     [SerializeField] private string bulletPoolKey = DefaultBulletPoolKey;
 
     private EnemyController _owner;
     private ObjectPoolManager _pool;
+
+    public WeaponData Data => weaponData;
 
     private void Awake()
     {
@@ -42,7 +48,7 @@ public sealed class EnemyWeapon : MonoBehaviour
     }
     private void HandleAttackRequested(Vector3 aimPosition)
     {
-        if(muzzle == null || _pool == null || !_pool.IsReady || GameManager.Instance == null)
+        if(muzzle == null || _pool == null || !_pool.IsReady || GameManager.Instance == null || weaponData == null)
             return;
         Vector3 spawnPosition = muzzle.position;
         Vector3 direction = aimPosition - spawnPosition;
