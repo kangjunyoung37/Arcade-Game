@@ -15603,16 +15603,13 @@ MonoBehaviour:
   chaseMemoryDuration: 3
   investigationStoppingDistance: 0.5
   attackRange: 8
-  attackInterval: 0.12
   attackRangeBuffer: 1
   attackAimTolerance: 10
-  burstCount: 3
-  burstCooldown: 1
   searchMoveTimeout: 6
   searchLookDuration: 4
   searchTurnSpeed: 90
-  serachStoppingDistance: 0.5
-  serachChaseRetryDelay: 1
+  searchStoppingDistance: 0.5
+  searchChaseRetryDelay: 1
 --- !u!195 &2039950121
 NavMeshAgent:
   m_ObjectHideFlags: 0
@@ -15648,6 +15645,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   muzzle: {fileID: 1126691807}
+  weaponData: {fileID: 0}
   bulletPoolKey: EnemyBullet
 --- !u!1 &2056923189
 GameObject:

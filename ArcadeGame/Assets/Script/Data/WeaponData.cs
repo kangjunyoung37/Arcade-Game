@@ -1,3 +1,4 @@
+using System;
 using UnityEngine;
 
 public enum FireMode
@@ -41,7 +42,7 @@ public class WeaponData : ScriptableObject
     public WeaponCategory category;
 
     [Header("Ammunition Compatibility")]
-    public AmmoCaliberData ammoCaliber;
+    public AmmoCaliberData caliber;
 
     [Header("Fire Mode"),Tooltip("기본 발사 모드")] 
   
@@ -88,22 +89,65 @@ public class WeaponData : ScriptableObject
     [Tooltip("탄약을 한 발 삽입하는 데 걸리는 시간"),Min(MinimumShotInterval)]
     public float insertRoundTime = 0.6f;
     
-    public int ShotsPerCycle => fireMode == FireMode.Burst ? Mathf.Max(burstCount, 1) : 1;
-    public float ShotInterval => Mathf.Max(MinimumShotInterval, fireRate);
-    public float CycleCooldown
+    public int ShotsPerCycle => GetShotsPerCycle(fireMode);
+
+    public float ShotInterval => GetShotInterval(fireMode);
+    public float CycleCooldown => GetCycleCooldown(fireMode);
+
+    public bool SupportsFireMode(FireMode mode)
     {
-        get
+        if (mode == fireMode) return true;
+        if(additionalFireModes == null) return false;
+        for(int i = 0; i < additionalFireModes.Length; i++)
         {
-            float interval = fireMode switch
-        {
-            FireMode.Single => singleFireDelay,
-            FireMode.Auto   => fireRate,
-            FireMode.Burst  => burstPostDelay,
-            _               => singleFireDelay
-        };
-        
-            return Mathf.Max(MinimumShotInterval, interval);
+            if (additionalFireModes[i] == mode) return true;
         }
+        return false;
+    }
+    public bool IsAmmoCompatible(BulletData ammo)
+    {
+        return ammo != null && caliber != null && ammo.caliber == caliber;
+    }
+    public int GetShotsPerCycle(FireMode mode)
+    {
+        return mode == FireMode.Burst ? Mathf.Max(1, burstCount) : 1;
     }
 
+    public float GetShotInterval(FireMode mode)
+    {
+        float interval = mode switch
+        {
+            FireMode.Single => singleFireDelay,
+            FireMode.Auto => fireRate,
+            FireMode.Burst => burstShotInterval,
+            _ => singleFireDelay
+        };
+        return Mathf.Max(MinimumShotInterval, interval);
+    }
+
+    public float GetCycleCooldown(FireMode mode)
+    {
+        return mode == FireMode.Burst ? Mathf.Max(MinimumShotInterval, burstPostDelay) : GetShotInterval(mode);
+    }
+#if UNITY_EDITOR
+    private void OnValidate()
+    {
+        fireRate = Mathf.Max(MinimumShotInterval, fireRate);
+        singleFireDelay = Mathf.Max(MinimumShotInterval, singleFireDelay);
+        burstShotInterval = Mathf.Max(MinimumShotInterval, burstShotInterval);
+        burstPostDelay = Mathf.Max(MinimumShotInterval, burstPostDelay);
+
+        burstCount = Mathf.Max(1, burstCount);
+        magazineSize = Mathf.Max(1, magazineSize);
+
+        actionCycleTime = Mathf.Max(0f, actionCycleTime);
+        reloadTime = Mathf.Max(MinimumShotInterval, reloadTime);
+        insertRoundTime = Mathf.Max(MinimumShotInterval, insertRoundTime);
+
+        baseSpread = Mathf.Max(0f, baseSpread);
+        maxSpread = Mathf.Max(baseSpread, maxSpread);
+        bloomPerShot = Mathf.Max(0f, bloomPerShot);
+        recoveryRate = Mathf.Max(0f, recoveryRate);
+    }
+#endif
 }
