@@ -12,8 +12,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 0f7c47fd4d8104f45a64286f892bd471, type: 3}
   m_Name: Rifle_Normal
   m_EditorClassIdentifier: 
-  bulletName: 
-  caliber: {fileID: 0}
+  bulletName: Rifle_Normal
+  caliber: {fileID: 11400000, guid: 03b52885dbe2f084fb7a540cf11ce0ca, type: 2}
   damage: 35
   penetrationLevel: 2
   projectilesPerRound: 1
