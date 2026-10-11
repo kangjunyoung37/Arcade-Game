@@ -44,8 +44,10 @@ public class WeaponData : ScriptableObject
     [Header("Ammunition Compatibility")]
     public AmmoCaliberData caliber;
 
+    [Header("Weapon Action")]
+    public WeaponActionType actionType = WeaponActionType.SelfLoading;
+
     [Header("Fire Mode"),Tooltip("기본 발사 모드")] 
-  
     public FireMode fireMode = FireMode.Single;
 
     [SerializeField, Tooltip("기본 모드 외에 추가로 지원하는 발사 모드")]

@@ -15645,7 +15645,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   muzzle: {fileID: 1126691807}
-  weaponData: {fileID: 0}
+  weaponData: {fileID: 11400000, guid: 50adcb566a73da447aba418c7c5f3e3e, type: 2}
+  reserveAmmo: {fileID: 11400000, guid: c2f1cfcda11c49e428995948a039a726, type: 2}
   bulletPoolKey: EnemyBullet
 --- !u!1 &2056923189
 GameObject:

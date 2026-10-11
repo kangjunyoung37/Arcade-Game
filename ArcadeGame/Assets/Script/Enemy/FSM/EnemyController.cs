@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.AI;
 
@@ -480,12 +481,7 @@ public sealed class EnemyController : MonoBehaviour
     }
     public bool TryRequestAttack()
     {
-        if (!HasWeaponData)
-        {
-            return false;
-        }
-        Action<Vector3> handler = AttackRequested;
-        if(handler == null || !HasTarget || !CanSeePlayer || !IsTargetWithinAttackHoldRange())
+        if(!HasWeaponData || _weapon == null || !_weapon.CanFire || !HasTarget || !CanSeePlayer || !IsTargetWithinAttackHoldRange())
         {
             return false;
         }
@@ -510,8 +506,7 @@ public sealed class EnemyController : MonoBehaviour
             return false;
         }
         Vector3 aimPosition = target.position + Vector3.up * targetAimHeight;
-        handler.Invoke(aimPosition);
-        return true;
+        return _weapon.TryFire(aimPosition);
     }
 #if UNITY_EDITOR
     private void OnValidate()
