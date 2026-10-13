@@ -16,7 +16,7 @@ MonoBehaviour:
   caliber: {fileID: 11400000, guid: 03b52885dbe2f084fb7a540cf11ce0ca, type: 2}
   damage: 35
   penetrationLevel: 2
-  projectilesPerRound: 8
+  projectilesPerRound: 1
   pelletSpreadHalfAngle: 30
   speed: 60
   lifetime: 5

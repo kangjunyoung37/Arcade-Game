@@ -1,6 +1,3 @@
-using System.Collections;
-using System.Collections.Generic;
-using Palmmedia.ReportGenerator.Core;
 using UnityEngine;
 
 [DisallowMultipleComponent]
@@ -8,6 +5,7 @@ using UnityEngine;
 public sealed class EnemyWeapon : MonoBehaviour
 {
     private const string DefaultBulletPoolKey = "EnemyBullet";
+    private const string DefaultCasingPoolKey = "Casing";
     private const float DirectionSqrEpsilon = 0.0001f;
     [Header("References")]
     [SerializeField] private Transform muzzle;
@@ -16,6 +14,9 @@ public sealed class EnemyWeapon : MonoBehaviour
     [SerializeField] private WeaponData weaponData;
     [SerializeField] private BulletData reserveAmmo;
 
+    [Header("Casing")]
+    [SerializeField] private Transform casingEjectPoint;
+    [SerializeField] private string casingPoolKey = DefaultCasingPoolKey;
 
     [Header("Projectile")]
     [SerializeField] private string bulletPoolKey = DefaultBulletPoolKey;
@@ -30,6 +31,7 @@ public sealed class EnemyWeapon : MonoBehaviour
 
     public WeaponData Data => weaponData;
     public bool IsReloading => _ammoSupply != null && _ammoSupply.IsReloading;
+    public bool IsCycling => _ammoSupply != null && _ammoSupply.IsCycling;
     public int LoadedRounds => _ammoSupply != null ? _ammoSupply.TotalLoadedRounds : 0;
 
     public bool CanFire => isActiveAndEnabled && _ammoSupply != null && _ammoSupply.CanFire;
@@ -56,7 +58,11 @@ public sealed class EnemyWeapon : MonoBehaviour
             enabled = false;
             return;
         }
-        if(weaponData.actionType != WeaponActionType.SelfLoading || weaponData.reloadType != WeaponReloadType.MagazineSwap)
+
+        bool supportedAction = weaponData.actionType == WeaponActionType.SelfLoading || weaponData.actionType == WeaponActionType.BoltAction || weaponData.actionType == WeaponActionType.PumpAction;
+        bool supportedReload = weaponData.reloadType == WeaponReloadType.MagazineSwap || weaponData.reloadType == WeaponReloadType.InsertOneRound;
+
+        if(!supportedAction || !supportedReload)
         {
             ReportConfigurationError("이번 구현은 자동 작동식·탄창 교체형·단일 발사체만 지원합니다. ");
             enabled = false;
@@ -71,7 +77,8 @@ public sealed class EnemyWeapon : MonoBehaviour
         _configuredAmmo = reserveAmmo;
         _reservedProjectiles = new Bullet[reserveAmmo.projectilesPerRound];
         CurrentSpread = Mathf.Clamp(weaponData.baseSpread, 0f, ProjectileSpread.MaximumHalfAngle);
-        _ammoSupply = new InfiniteReserveAmmo(weaponData.caliber, weaponData.magazineSize, reserveAmmo, weaponData.reloadTime);
+        _ammoSupply = new InfiniteReserveAmmo(weaponData.caliber, weaponData.magazineSize, reserveAmmo, weaponData.reloadTime, weaponData.actionType, weaponData.actionCycleTime, weaponData.reloadType, weaponData.insertRoundTime);
+        _ammoSupply.SpentCaseEjected += HandleSpentCaseEjected;
 
         _owner = GetComponent<EnemyController>();
     }
@@ -184,6 +191,23 @@ public sealed class EnemyWeapon : MonoBehaviour
         float maximumSpread = Mathf.Clamp(weaponData.maxSpread, baseSpread, ProjectileSpread.MaximumHalfAngle);
         CurrentSpread = Mathf.MoveTowards(Mathf.Clamp(CurrentSpread, baseSpread, maximumSpread), baseSpread, Mathf.Max(0f,weaponData.recoveryRate) * recoveryTime);
     }
+
+    private void HandleSpentCaseEjected()
+    {
+        if(!isActiveAndEnabled || casingEjectPoint == null || _pool == null || !_pool.IsReady) return;
+        Casing casing = _pool.GetCasing(casingPoolKey);
+        if(casing == null) return;
+
+        casing.transform.SetPositionAndRotation(casingEjectPoint.position,casingEjectPoint.rotation);
+
+        casing.Eject(casingEjectPoint.forward);    
+    }
+
+    private void OnDestroy()
+    {
+        if(_ammoSupply != null) _ammoSupply.SpentCaseEjected -= HandleSpentCaseEjected;        
+    }
+
     [System.Diagnostics.Conditional("UNITY_EDITOR")]
     [System.Diagnostics.Conditional("DEVELOPMENT_BUILD")]
     private void ReportConfigurationError(string message)
