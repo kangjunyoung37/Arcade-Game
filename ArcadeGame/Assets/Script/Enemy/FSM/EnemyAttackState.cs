@@ -20,6 +20,8 @@ public sealed class EnemyAttackState : IState
     {
         _owner.StopMoving();
         _shotsInBurst = 0;
+        if(_owner.StrafeMovement != null)
+            _owner.StrafeMovement.Begin();
     }
     public void Tick(float deltaTime)
     {
@@ -38,6 +40,8 @@ public sealed class EnemyAttackState : IState
             _owner.ChangeState(_owner.ChaseState);
             return;
         }
+        if(_owner.StrafeMovement != null) _owner.StrafeMovement.Tick(deltaTime);
+
         _owner.FaceLastKnownPosition(deltaTime);
 
         if(Time.time < _nextAttackTime)
@@ -53,6 +57,8 @@ public sealed class EnemyAttackState : IState
     }
     public void Exit()
     {
+        if(_owner.StrafeMovement != null) _owner.StrafeMovement.End();
+        
         if(_shotsInBurst > 0)
         {
             _nextAttackTime = Mathf.Max(_nextAttackTime, Time.time + _owner.BurstCooldown);

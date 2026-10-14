@@ -104,6 +104,8 @@ public sealed class EnemyController : MonoBehaviour
     
     public bool CanNaviagate => _agent != null && _agent.isActiveAndEnabled && _agent.isOnNavMesh;
     public bool IsPathPendinng => CanNaviagate && _agent.pathPending;
+    
+    public EnemyStrafeMovement StrafeMovement {get; private set;}
 
     public IState AttackState { get; private set; }
 
@@ -177,7 +179,8 @@ public sealed class EnemyController : MonoBehaviour
         AttackState = new EnemyAttackState(this);
         SearchState = new EnemySearchState(this);
         TryGetComponent(out _weapon);
-
+        TryGetComponent(out EnemyStrafeMovement strafeMovement);
+        StrafeMovement = strafeMovement;
     }
 
     private void Start()
