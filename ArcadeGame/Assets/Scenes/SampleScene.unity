@@ -15642,6 +15642,8 @@ MonoBehaviour:
   searchTurnSpeed: 90
   searchStoppingDistance: 0.5
   searchChaseRetryDelay: 1
+  reloadWhenTargetnotVisible: 1
+  reloadAfterLostSightDelay: 2
 --- !u!195 &2039950121
 NavMeshAgent:
   m_ObjectHideFlags: 0
@@ -15682,6 +15684,7 @@ MonoBehaviour:
   casingEjectPoint: {fileID: 862188100}
   casingPoolKey: Casing
   bulletPoolKey: EnemyBullet
+  interruptReloadToAttack: 1
 --- !u!1 &2056923189
 GameObject:
   m_ObjectHideFlags: 0

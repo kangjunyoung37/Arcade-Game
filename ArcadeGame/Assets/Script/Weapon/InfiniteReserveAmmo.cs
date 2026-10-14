@@ -27,6 +27,11 @@ public sealed class InfiniteReserveAmmo
     public bool CanFire => Phase == AmmoSupplyPhase.Ready && _chamber.HasLiveRound;
     public int MagazineCount => _magazine.Count;
     public int TotalLoadedRounds => _magazine.Count + (_chamber.HasLiveRound ? 1 : 0);
+    public int LoadedCapacity => _magazine.Capacity;
+    private bool HasRoomForRound => TotalLoadedRounds < LoadedCapacity && !_magazine.IsFull;
+    public bool CanStartReload => Phase == AmmoSupplyPhase.Ready && !_chamber.HasSpentCase && HasRoomForRound;
+    public bool CanInterruptReload => Phase == AmmoSupplyPhase.Reloading && _reloadType == WeaponReloadType.InsertOneRound && (_chamber.HasLiveRound || (_chamber.IsEmpty && !_magazine.IsEmpty));
+
 
     public event Action SpentCaseEjected;
 
@@ -117,6 +122,24 @@ public sealed class InfiniteReserveAmmo
             Phase = AmmoSupplyPhase.Cycling;
             _remainingTime = _actionCycleDuration;
         }
+        return true;    
+    }
+
+    public bool TryInterruptReload()
+    {
+        if(!CanInterruptReload) return false;
+        //약실에 실탄이 있으면 그대로 사용 비어 있음녀 장전
+        if(!_chamber.HasLiveRound && !_chamber.TryFeedFromMagazine(_magazine)) return false;
+        _remainingTime = 0f;
+        Phase = AmmoSupplyPhase.Ready;
+
+        return true;
+    }
+
+    public bool TryStartReload()
+    {
+        if(!CanStartReload) return false;
+        BeginReload();
         return true;
     }
 
@@ -154,12 +177,18 @@ public sealed class InfiniteReserveAmmo
             FinishReload();
             return;        
         }
+        if (!HasRoomForRound)
+        {
+            FinishReload();
+            return;
+        }
+
         if (!_magazine.TryLoadRound(_reserveAmmo))
         {
             FinishReload();
             return;
         }
-        if (_magazine.IsFull)
+        if (!HasRoomForRound)
         {
             FinishReload();
             return;
@@ -169,14 +198,14 @@ public sealed class InfiniteReserveAmmo
     
     private void FinishReload()
     {
-        _chamber.TryFeedFromMagazine(_magazine);
+        if (_chamber.IsEmpty) _chamber.TryFeedFromMagazine(_magazine);
         Phase = AmmoSupplyPhase.Ready;
         _remainingTime = 0f;
     }
 
     private void FillMagazine()
     {
-        while (!_magazine.IsFull)
+        while (HasRoomForRound)
         {
             if (!_magazine.TryLoadRound(_reserveAmmo))
             {

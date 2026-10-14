@@ -31,4 +31,4 @@ MonoBehaviour:
   reloadType: 1
   magazineSize: 3
   reloadTime: 2
-  insertRoundTime: 0.6
+  insertRoundTime: 2

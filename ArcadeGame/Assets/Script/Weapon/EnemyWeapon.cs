@@ -20,6 +20,10 @@ public sealed class EnemyWeapon : MonoBehaviour
 
     [Header("Projectile")]
     [SerializeField] private string bulletPoolKey = DefaultBulletPoolKey;
+
+    [Header("Reload Behavior")] 
+    [SerializeField] private bool interruptReloadToAttack  = true;
+
     private ObjectPoolManager _pool;
     private InfiniteReserveAmmo _ammoSupply;
     private EnemyController _owner;
@@ -36,7 +40,8 @@ public sealed class EnemyWeapon : MonoBehaviour
 
     public bool CanFire => isActiveAndEnabled && _ammoSupply != null && _ammoSupply.CanFire;
     public float CurrentSpread{get; private set;}
-
+    public bool CanRequestFire => isActiveAndEnabled && _ammoSupply != null && (_ammoSupply.CanFire || ( interruptReloadToAttack && _ammoSupply.CanInterruptReload));
+    public bool CanStartReload => isActiveAndEnabled && _ammoSupply != null && _ammoSupply.CanStartReload;
 
     private void Awake()
     {
@@ -98,7 +103,7 @@ public sealed class EnemyWeapon : MonoBehaviour
 
     public bool TryFire(Vector3 aimPosition)
     {
-        if (!CanFire || muzzle == null || weaponData == null ||_pool == null || !_pool.IsReady || GameManager.Instance == null)
+        if (!CanRequestFire || muzzle == null || weaponData == null ||_pool == null || !_pool.IsReady || GameManager.Instance == null)
         {
             return false;
         }
@@ -120,6 +125,13 @@ public sealed class EnemyWeapon : MonoBehaviour
         {
             return false;
         }
+        //아직 발사 가능한 상태가 아니라면 장전 중단
+        if(!CanFire && !_ammoSupply.TryInterruptReload())
+        {
+            ReturnReservedProjectiles(projectileCount);
+            return false;
+        }
+
         if(!_ammoSupply.TryConsumeRound(out BulletData ammo))
         {
             ReturnReservedProjectiles(projectileCount);
@@ -150,6 +162,12 @@ public sealed class EnemyWeapon : MonoBehaviour
         _remainingSpreadRecoveryDelay = weaponData.GetShotInterval(weaponData.fireMode);
 
         return true;
+    }
+
+    public bool TryStartReload()
+    {
+        if(!CanStartReload) return false;
+        return _ammoSupply.TryStartReload();
     }
     private bool TryReserveProjectiles(int count)
     {
@@ -214,4 +232,5 @@ public sealed class EnemyWeapon : MonoBehaviour
     {
         Debug.LogError(message, this);
     }
+
 }

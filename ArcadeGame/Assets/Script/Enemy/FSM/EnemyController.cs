@@ -72,6 +72,10 @@ public sealed class EnemyController : MonoBehaviour
     [SerializeField, Min(0.1f)] private float searchStoppingDistance = 0.5f;
     [SerializeField, Min(0.1f)] private float searchChaseRetryDelay = 1f;
 
+    [Header("Reload Decision")]
+    [SerializeField] private bool reloadWhenTargetnotVisible = true;
+    [SerializeField, Min(0f)] private float reloadAfterLostSightDelay = 2f;
+    private float _timeWithoutSight;
     private float _viewDotThreshold;
     private NavMeshAgent _agent;
     private StateMachine _stateMachine;
@@ -184,8 +188,11 @@ public sealed class EnemyController : MonoBehaviour
 
     private void Update()
     {
-        UpdatePerception(Time.deltaTime);
-        _stateMachine.Tick(Time.deltaTime);
+        float deltaTime = Time.deltaTime;
+
+        UpdatePerception(deltaTime);
+        _stateMachine.Tick(deltaTime);
+        UpdateReloadDecision(deltaTime);
     }
 
     private void OnDestroy()
@@ -196,6 +203,7 @@ public sealed class EnemyController : MonoBehaviour
     {
         PlayerNoise.Emitted += HandlePlayerNoise;
         _remainingPerceptionTime = 0f;
+        _timeWithoutSight = 0f;
     }
 
     private void OnDisable()
@@ -444,6 +452,23 @@ public sealed class EnemyController : MonoBehaviour
             _stateMachine.ChangeState(AlertState);
         }
     }
+    private void UpdateReloadDecision(float deltaTime)
+    {
+        if(!reloadWhenTargetnotVisible || _weapon == null || !_weapon.isActiveAndEnabled)
+        {
+            _timeWithoutSight = 0f;
+            return;
+        }
+        if (CanSeePlayer)
+        {
+            _timeWithoutSight = 0f;
+            return;
+        }
+        float delay = Mathf.Max(0f, reloadAfterLostSightDelay);
+        _timeWithoutSight = Mathf.Min(_timeWithoutSight + Mathf.Max(0f, deltaTime),delay);
+        if(_timeWithoutSight < delay) return;
+        if(_weapon.CanStartReload) _weapon.TryStartReload();
+    }
     public void FaceLastKnownPosition(float deletaTime)
     {
         Vector3 direction = LastKnownPlayerPosition - transform.position;
@@ -481,7 +506,7 @@ public sealed class EnemyController : MonoBehaviour
     }
     public bool TryRequestAttack()
     {
-        if(!HasWeaponData || _weapon == null || !_weapon.CanFire || !HasTarget || !CanSeePlayer || !IsTargetWithinAttackHoldRange())
+        if(!HasWeaponData || _weapon == null || !_weapon.CanRequestFire  || !HasTarget || !CanSeePlayer || !IsTargetWithinAttackHoldRange())
         {
             return false;
         }
