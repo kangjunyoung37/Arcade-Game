@@ -165,6 +165,8 @@ public sealed class EnemyController : MonoBehaviour
         }
     }
 
+    public EnemyCombatDecision CombatDecision {get; private set;}
+
     private void Awake()
     {
         _agent = GetComponent<NavMeshAgent>();
@@ -181,6 +183,8 @@ public sealed class EnemyController : MonoBehaviour
         TryGetComponent(out _weapon);
         TryGetComponent(out EnemyStrafeMovement strafeMovement);
         StrafeMovement = strafeMovement;
+        TryGetComponent(out EnemyCombatDecision combatDecision);
+        CombatDecision = combatDecision;
     }
 
     private void Start()

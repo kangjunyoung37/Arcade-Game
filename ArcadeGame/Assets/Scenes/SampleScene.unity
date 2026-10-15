@@ -15467,6 +15467,7 @@ GameObject:
   - component: {fileID: 2039950120}
   - component: {fileID: 2039950122}
   - component: {fileID: 2039950123}
+  - component: {fileID: 2039950124}
   m_Layer: 9
   m_Name: DommyEnemy
   m_TagString: Untagged
@@ -15698,14 +15699,34 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 2368e346858c6174c86d6876b6e723e7, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  moveSpeed: 2
-  strafeDistance: 3
+  moveSpeed: 4
+  moveAcceleration: 60
+  minStrafeDistance: 1.2
+  maxStrafeDistance: 3.5
   stoppingDistance: 0.15
   moveTimeout: 2.5
-  minPauseDuration: 0.25
-  maxPauseDuration: 0.6
+  minPauseDuration: 0.1
+  maxPauseDuration: 0.2
+  blockedRetryDelay: 0.3
+  retreatStepDistance: 1.5
+  retreatSideAngle: 35
+  retreatRepathInterval: 0.2
   sampleRadius: 0.4
   maxHeightDifference: 0.5
+--- !u!114 &2039950124
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2039950112}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 0924c588a0fe121448b4ee5509233cf0, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  retreatEnterDistance: 4
+  retreatExitDistance: 6
 --- !u!1 &2056923189
 GameObject:
   m_ObjectHideFlags: 0

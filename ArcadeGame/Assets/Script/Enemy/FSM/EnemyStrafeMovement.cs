@@ -9,18 +9,31 @@ public class EnemyStrafeMovement : MonoBehaviour
     private const float MinimumInterval = 0.1f;
     private const float MaximumSweepAngle = 30f;
     private const float MinimumTravelMultiplier = 2f;
+    private const float MinimumPauseDuration =0.02f;
+    private const float RetreatLookAheadMultiplier = 2f;
     [Header("Movement")]
-    [SerializeField, Min(0.1f)] private float moveSpeed = 2f;
-    [SerializeField, Min(0.1f)] private float strafeDistance = 2f;
+    [SerializeField, Min(0.1f)] private float moveSpeed = 4f;
+    [SerializeField, Min(0.1f)] private float moveAcceleration = 60f;
+    [SerializeField, Min(0.1f)] private float minStrafeDistance = 1.2f;
+    [SerializeField, Min(0.1f)] private float maxStrafeDistance = 3.5f;
     [SerializeField, Min(0.1f)] private float stoppingDistance = 0.15f;
     [SerializeField, Min(0.1f)] private float moveTimeout = 2.5f;
+    
     [Header("Pause Between Moves")]
-    [SerializeField, Min(MinimumInterval)] private float minPauseDuration = 0.25f;
-    [SerializeField, Min(MinimumInterval)] private float maxPauseDuration = 0.6f;
+    [SerializeField, Min(MinimumPauseDuration)] private float minPauseDuration = 0.05f;
+    [SerializeField, Min(MinimumPauseDuration)] private float maxPauseDuration = 0.2f;
+    [SerializeField, Min(MinimumInterval)] private float blockedRetryDelay = 0.3f;
+
+    [Header("Retreat")]
+    [SerializeField, Min(0.1f)] private float retreatStepDistance = 1.5f;
+    [SerializeField, Range(0f, 60f)] private float retreatSideAngle = 35f;
+    [SerializeField, Min(MinimumInterval)] private float retreatRepathInterval = 0.2f;
+
     [Header("NavMesh Validation")]
     [SerializeField, Min(0.05f)] private float sampleRadius = 0.4f;
     [SerializeField, Min(0f)] private float maxHeightDifference = 0.5f;
     private EnemyController _owner;
+    private EnemyCombatMoveIntent _movementIntent;
     private NavMeshAgent _agent;
     private bool _running;
     private bool _moving;
@@ -30,9 +43,11 @@ public class EnemyStrafeMovement : MonoBehaviour
     private float _remainingMoveTime;
 
     private float _previousSpeed;
+    private float _previousAcceleration;
     private float _previousStoppingDistance;
     private bool _previousUpdateRotation;
-
+    private float _remainingRetreatRepath;
+    private bool _previousAutoBraking;
     private bool CanNavigate => _agent != null && _agent.isActiveAndEnabled && _agent.isOnNavMesh;
     private void Awake()
     {
@@ -43,22 +58,47 @@ public class EnemyStrafeMovement : MonoBehaviour
     {
         if(_running || !isActiveAndEnabled || _owner == null || !CanNavigate) return;
         _previousSpeed = _agent.speed;
+        _previousAcceleration = _agent.acceleration;
         _previousStoppingDistance = _agent.stoppingDistance;
         _previousUpdateRotation = _agent.updateRotation;
+        _previousAutoBraking = _agent.autoBraking;
+        _remainingRetreatRepath = 0f;
         _owner.StopMoving();
         _agent.speed = Mathf.Max(MinimumInterval, moveSpeed);
+        _agent.acceleration = Mathf.Max(MinimumInterval, moveAcceleration);
         _agent.stoppingDistance = Mathf.Max(0.05f, stoppingDistance);
         _agent.updateRotation = false;
 
         _side = Random.value < 0.5f ? -1 : 1;
         _remainingPause = GetPauseDuration();
         _moving = false;
+        _movementIntent = EnemyCombatMoveIntent.Strafe;
         _running = true;
     }
     
-    public void Tick(float deltaTime)
+    public void Tick(float deltaTime, EnemyCombatMoveIntent intent)
     {
+
         if(!_running || _owner == null || !CanNavigate || deltaTime <= 0f) return;
+       
+        if(_movementIntent != intent)
+        {
+            _movementIntent = intent;
+            //이전 이동 목적지 취소 새 행동 전환
+            _owner.StopMoving();
+            _moving = false;
+            _remainingPause = 0f;
+            _remainingRetreatRepath = 0f;
+
+            _agent.autoBraking = intent == EnemyCombatMoveIntent.Retreat ? false : _previousAutoBraking;
+        }
+
+        if(_movementIntent == EnemyCombatMoveIntent.Retreat)
+        {
+            TickRetreat(deltaTime);
+            return;
+        }
+        
         if(_moving)
         {
             _remainingMoveTime -= deltaTime;
@@ -67,20 +107,23 @@ public class EnemyStrafeMovement : MonoBehaviour
             {
                 _owner.StopMoving();
                 _moving = false;
-                _side = -_side;
                 _remainingPause = GetPauseDuration();
             }
             return;
         }
         _remainingPause -= deltaTime;
         if(_remainingPause > 0f) return;
+        
+        _side = Random.value < 0.5f ? -1 : 1;
+
         if(TryStartMove(_side)) return;
+        
         if (TryStartMove(-_side))
         {
             _side = -_side;
             return;
         }
-        _remainingPause = GetPauseDuration();
+        _remainingPause = Mathf.Max(MinimumInterval, blockedRetryDelay);
     }
     private bool TryStartMove(int side)
     {
@@ -93,21 +136,45 @@ public class EnemyStrafeMovement : MonoBehaviour
         offset.y = 0f;
         if(offset.sqrMagnitude <= DirectionSqrEpsion) return false;
         float radius = offset.magnitude;
-        // 같은 반지름 위에 좌위 지점 선택
-        float angle = Mathf.Min(Mathf.Max(0f,strafeDistance) / radius * Mathf.Rad2Deg, MaximumSweepAngle);
+        
+        float configuredMinimum = Mathf.Max(0.1f,minStrafeDistance);
+        float configuredMaximum = Mathf.Max(configuredMinimum, maxStrafeDistance);
+
+        //플레이어에게 너무 가까우면 큰 각도로 돌아가지 않도록
+        float maximumArcDistance = radius * MaximumSweepAngle * Mathf.Deg2Rad;
+        
+        //먼저 가능한 범위를 제한한 다음 그 안에서 추출
+        float maximumDistance = Mathf.Min(configuredMaximum, maximumArcDistance);
+        float minimumDistance = Mathf.Min(configuredMinimum, maximumDistance);
+        float selectedDistance = Random.Range(minimumDistance,maximumDistance);
+        float angle = selectedDistance /radius * Mathf.Rad2Deg;
+
         Vector3 candidate = center + Quaternion.AngleAxis(angle * side, Vector3.up) * offset;
         candidate.y = origin.y;
+        return TryMoveToCandidate(origin,candidate,false);
+    }
+    private bool TryMoveToCandidate(Vector3 origin, Vector3 candidate, bool mustIncreaseDistance)
+    {
         NavMeshQueryFilter filter = new NavMeshQueryFilter
         {
             agentTypeID = _agent.agentTypeID,
             areaMask = _agent.areaMask
         };
-        //특정 좌표에서 일정 거리 이내에 존재하는 가장 가까운 NavMesh 지점 찾기
         if(!NavMesh.SamplePosition(candidate, out NavMeshHit sampledHit, sampleRadius, filter)) return false;
         if(Mathf.Abs(sampledHit.position.y - origin.y) > maxHeightDifference) return false;
-        float minimumTravle = _agent.stoppingDistance * MinimumTravelMultiplier;
-        if((sampledHit.position - origin).sqrMagnitude <= minimumTravle * minimumTravle) return false;
-        //NavMesh 위에서 직접 이동 가능한지 확인
+        float minimumTravel = _agent.stoppingDistance * MinimumTravelMultiplier;
+        if((sampledHit.position - origin).sqrMagnitude <= minimumTravel  * minimumTravel ) return false;
+        if (mustIncreaseDistance)
+        {
+            Vector3 center = _owner.LastKnownPlayerPosition;
+            
+            Vector3 currentOffset = origin - center;
+            Vector3 candidateOffset = sampledHit.position - center;
+
+            currentOffset.y = 0f;
+            candidateOffset.y = 0f;
+            if(candidateOffset.sqrMagnitude <= currentOffset.sqrMagnitude + DirectionSqrEpsion) return false;
+        }
         if(_agent.Raycast(sampledHit.position, out _)) return false;
         if(!_agent.SetDestination(sampledHit.position)) return false;
         _agent.isStopped = false;
@@ -116,6 +183,58 @@ public class EnemyStrafeMovement : MonoBehaviour
         return true;
     }
 
+    private bool TryStartRetreat()
+    {
+        if(!_owner.HasTarget || !_owner.CanSeePlayer) return false;
+
+        Vector3 orgin = _agent.nextPosition - Vector3.up * _agent.baseOffset;
+        Vector3 away = orgin - _owner.LastKnownPlayerPosition;
+        away.y = 0f;
+
+        //겹쳤을 경우 반대로 이동
+        if(away.sqrMagnitude <= DirectionSqrEpsion)
+        {
+            away = -transform.forward;
+            away.y = 0f;
+        }
+        if(away.sqrMagnitude <= DirectionSqrEpsion) return false;
+
+        away.Normalize();
+        float interval = Mathf.Max(MinimumInterval, retreatRepathInterval);
+        
+        //다음 갱신 전에 목저지에 도착하지 않도록 이동 속도와 갠신 주기에 맞춰 여유 거리 확보
+        float lookAheadDistance = _agent.speed * interval * RetreatLookAheadMultiplier + _agent.stoppingDistance;
+        float distance = Mathf.Max(Mathf.Max(MinimumInterval, retreatStepDistance, lookAheadDistance));
+        //정면 반대 방향으로 후퇴
+        Vector3 candidate = orgin + away * distance;
+        if(TryMoveToCandidate(orgin, candidate, true)) return true;
+        //뒤가 막혀있을 경우 대각선을 채택
+        float firstSide = Random.value < 0.5f ? -1f : 1f;
+
+        Vector3 diagonal = Quaternion.AngleAxis(retreatSideAngle * firstSide, Vector3.up) * away;
+        candidate = orgin + diagonal * distance;
+        if(TryMoveToCandidate(orgin, candidate, true)) return true;
+        //반대쪽 대각선 검사
+        diagonal = Quaternion.AngleAxis(-retreatSideAngle * firstSide, Vector3.up) * away;
+        candidate = orgin + diagonal * distance;
+        return TryMoveToCandidate(orgin, candidate, true);
+    }
+
+    private void TickRetreat(float deltaTime)
+    {
+        _remainingRetreatRepath -= deltaTime;
+        // 갱신 주기가 되지 않았거나 경로 계산 중이면 기존 목적지로 이동
+        if(_remainingRetreatRepath > 0f || _agent.pathPending) return;
+
+        _remainingRetreatRepath = Mathf.Max(MinimumInterval, retreatRepathInterval);
+
+        // 이동을 멈추지 않고 다음 후퇴 목적지로 이동
+        if(TryStartRetreat()) return;
+        _owner.StopMoving();
+        _moving = false;
+
+        _remainingRetreatRepath = Mathf.Max(MinimumInterval, blockedRetryDelay);
+    }
     public void End()
     {
         if(!_running) return;
@@ -125,13 +244,15 @@ public class EnemyStrafeMovement : MonoBehaviour
             _agent.speed = _previousSpeed;
             _agent.stoppingDistance = _previousStoppingDistance;
             _agent.updateRotation = _previousUpdateRotation;
+            _agent.acceleration = _previousAcceleration;
+            _agent.autoBraking = _previousAutoBraking;
         }
         _moving = false;
         _running = false;
     }
     private float GetPauseDuration()
     {
-        float minimum = Mathf.Max(MinimumInterval, minPauseDuration);
+        float minimum = Mathf.Max(MinimumPauseDuration, minPauseDuration);
         float maximum = Mathf.Max(minimum, maxPauseDuration);
 
         return Random.Range(minimum, maximum);

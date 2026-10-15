@@ -15,8 +15,8 @@ MonoBehaviour:
   weaponName: Shotgun
   category: 3
   caliber: {fileID: 11400000, guid: 03b52885dbe2f084fb7a540cf11ce0ca, type: 2}
-  actionType: 2
-  fireMode: 0
+  actionType: 0
+  fireMode: 1
   additionalFireModes: 
   fireRate: 0.1
   singleFireDelay: 0.2
@@ -28,7 +28,7 @@ MonoBehaviour:
   maxSpread: 15
   bloomPerShot: 3
   recoveryRate: 10
-  reloadType: 1
-  magazineSize: 3
+  reloadType: 0
+  magazineSize: 30
   reloadTime: 2
   insertRoundTime: 2

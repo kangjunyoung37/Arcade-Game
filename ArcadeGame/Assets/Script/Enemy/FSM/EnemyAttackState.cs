@@ -20,6 +20,10 @@ public sealed class EnemyAttackState : IState
     {
         _owner.StopMoving();
         _shotsInBurst = 0;
+        if(_owner.CombatDecision != null)
+        {
+            _owner.CombatDecision.ResetDecision();
+        }
         if(_owner.StrafeMovement != null)
             _owner.StrafeMovement.Begin();
     }
@@ -40,7 +44,10 @@ public sealed class EnemyAttackState : IState
             _owner.ChangeState(_owner.ChaseState);
             return;
         }
-        if(_owner.StrafeMovement != null) _owner.StrafeMovement.Tick(deltaTime);
+        EnemyCombatMoveIntent intent = EnemyCombatMoveIntent.Strafe;
+        if(_owner.CombatDecision != null && _owner.CombatDecision.isActiveAndEnabled)
+            intent = _owner.CombatDecision.Evaluate();
+        if(_owner.StrafeMovement != null) _owner.StrafeMovement.Tick(deltaTime, intent);
 
         _owner.FaceLastKnownPosition(deltaTime);
 
