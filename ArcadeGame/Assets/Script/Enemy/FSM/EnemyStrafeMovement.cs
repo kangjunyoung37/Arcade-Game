@@ -204,7 +204,7 @@ public class EnemyStrafeMovement : MonoBehaviour
         
         //다음 갱신 전에 목저지에 도착하지 않도록 이동 속도와 갠신 주기에 맞춰 여유 거리 확보
         float lookAheadDistance = _agent.speed * interval * RetreatLookAheadMultiplier + _agent.stoppingDistance;
-        float distance = Mathf.Max(Mathf.Max(MinimumInterval, retreatStepDistance, lookAheadDistance));
+        float distance = Mathf.Max(Mathf.Max(MinimumInterval, retreatStepDistance),lookAheadDistance);
         //정면 반대 방향으로 후퇴
         Vector3 candidate = orgin + away * distance;
         if(TryMoveToCandidate(orgin, candidate, true)) return true;
