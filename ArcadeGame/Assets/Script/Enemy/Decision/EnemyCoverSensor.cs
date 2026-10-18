@@ -73,7 +73,7 @@ public sealed class EnemyCoverSensor : MonoBehaviour
         _queryPath = new NavMeshPath();
     }
 
-    public bool TryFindCover(Vector3 lastKnownThreatPosition, out Transform selectedPoint, out Vector3 destination)
+    public bool TryFindCover(Vector3 lastKnownThreatPosition, out CoverPoint selectedPoint, out Vector3 destination)
     {
         selectedPoint = null;
         destination = default;
@@ -98,7 +98,7 @@ public sealed class EnemyCoverSensor : MonoBehaviour
             if(result != CoverEvaluation.Valid || cost >= bestCost)
                 continue;
             bestCost = cost;
-            selectedPoint = point.transform;
+            selectedPoint = point;
             destination = candidatePosition;
         }
         return selectedPoint != null;
@@ -207,12 +207,31 @@ public sealed class EnemyCoverSensor : MonoBehaviour
 
         return Physics.Raycast(origin, diretion / distance, distance, coverBlockingMask, QueryTriggerInteraction.Ignore);
     }
+
+    public bool IsCoverPositionSafe(Vector3 groundPosition, Vector3 lastKnownThreatPosition)
+    {
+        if(!isActiveAndEnabled || _agent == null || !_agent.isActiveAndEnabled || !_agent.isOnNavMesh || coverBlockingMask.value == 0)
+            return false;
+        Vector3 offset = groundPosition - lastKnownThreatPosition;
+        offset.y = 0f;
+        float minimumDistance = Mathf.Max(0f, minimumThreatDistance);
+
+        if(offset.sqrMagnitude < minimumDistance * minimumDistance)
+            return false;
+        if(!HasStandingSpace(groundPosition))
+            return false;
+        Vector3 threatEye = lastKnownThreatPosition + Vector3.up * threatEyeHeight;
+
+        return IsProtected(groundPosition, threatEye);
+
+    }
+
 #if UNITY_EDITOR
     private const string TestMenuName = "Test/Find Cover";
     private const float MarkerRadius = 0.2f;
     [Header("Editor Test Result")]
     [SerializeField] private bool testFoundCover;
-    [SerializeField] private Transform testSelectedPoint;
+    [SerializeField] private CoverPoint testSelectedPoint;
     [SerializeField] private Vector3 testDestination;
 
 

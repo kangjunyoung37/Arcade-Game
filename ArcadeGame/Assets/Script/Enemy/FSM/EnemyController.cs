@@ -75,6 +75,14 @@ public sealed class EnemyController : MonoBehaviour
     [Header("Reload Decision")]
     [SerializeField] private bool reloadWhenTargetnotVisible = true;
     [SerializeField, Min(0f)] private float reloadAfterLostSightDelay = 2f;
+
+    [Header("Cover")]
+    [SerializeField, Min(0.1f)] private float coverMoveSpeed = 6f;
+    [SerializeField, Min(0.1f)] private float coverAcceleration = 60f;
+    [SerializeField, Min(0.1f)] private float coverMoveTimeOut = 8f;
+    [SerializeField, Min(0.1f)] private float coverHoldDuration = 3f;
+    [SerializeField, Min(0.1f)] private float coverCheckInterval = 0.25f;
+
     private float _timeWithoutSight;
     private float _viewDotThreshold;
     private NavMeshAgent _agent;
@@ -87,7 +95,7 @@ public sealed class EnemyController : MonoBehaviour
     private bool _hasPendingNoise;
     private Vector3 _pendingNoisePosition;
     private EnemyWeapon _weapon;
-    
+    private bool _hasStarted;
 
     public float SearchMoveTimeout => searchMoveTimeout;
     public float SearchLookDuration => searchLookDuration;
@@ -104,6 +112,11 @@ public sealed class EnemyController : MonoBehaviour
     
     public bool CanNaviagate => _agent != null && _agent.isActiveAndEnabled && _agent.isOnNavMesh;
     public bool IsPathPendinng => CanNaviagate && _agent.pathPending;
+    public float CoverMoveSpeed => coverMoveSpeed;
+    public float CoverAcceleration => coverAcceleration;
+    public float CoverMoveTimeout => coverMoveTimeOut;
+    public float CoverHoldDuration => coverHoldDuration;
+    public float CoverCheckInterval => coverCheckInterval;
     
     public EnemyStrafeMovement StrafeMovement {get; private set;}
 
@@ -166,6 +179,9 @@ public sealed class EnemyController : MonoBehaviour
     }
 
     public EnemyCombatDecision CombatDecision {get; private set;}
+    public EnemyCoverSensor CoverSensor {get; private set;}
+    public EnemyCoverState CoverState {get; private set;}
+
 
     private void Awake()
     {
@@ -185,12 +201,19 @@ public sealed class EnemyController : MonoBehaviour
         StrafeMovement = strafeMovement;
         TryGetComponent(out EnemyCombatDecision combatDecision);
         CombatDecision = combatDecision;
+        TryGetComponent(out EnemyCoverSensor coverSensor);
+        CoverSensor = coverSensor;
+
+        CoverState = new EnemyCoverState(this, _agent, CoverSensor);
+
     }
 
     private void Start()
     {
         TryResolvePlayerTarget();
         _stateMachine.Start(IdleState);
+        if(_stateMachine.CurrentState == null)
+            _stateMachine.Start(IdleState);
     }
 
     private void Update()
@@ -204,18 +227,27 @@ public sealed class EnemyController : MonoBehaviour
 
     private void OnDestroy()
     {
-        _stateMachine.Stop();
+        _stateMachine?.Stop();
     }
     private void OnEnable()
     {
         PlayerNoise.Emitted += HandlePlayerNoise;
         _remainingPerceptionTime = 0f;
         _timeWithoutSight = 0f;
+        //최초 활성화때는 Start가 초기 상태 시작
+        //재활성화시 Idle 에서 시작
+        if(_hasStarted && _stateMachine != null && _stateMachine.CurrentState == null)
+        {
+            _stateMachine.Start(IdleState);
+        }
     }
 
     private void OnDisable()
     {
         PlayerNoise.Emitted -= HandlePlayerNoise;
+
+        _stateMachine?.Stop();
+
         _hasPendingNoise = false;
         CanSeePlayer = false;
     }
@@ -398,8 +430,17 @@ public sealed class EnemyController : MonoBehaviour
 
     private bool CanProcessAlertStimuli()
     {
-        IState current = _stateMachine.CurrentState;
-        return current != null && (ReferenceEquals(current, IdleState) || ReferenceEquals(current, PatrolState) || ReferenceEquals(current, AlertState) || ReferenceEquals(current, ChaseState)||ReferenceEquals(current, SearchState) || ReferenceEquals(current, AttackState));
+       IState current = _stateMachine.CurrentState;
+
+        return current != null && 
+        (ReferenceEquals(current, IdleState) ||
+            ReferenceEquals(current, PatrolState) ||
+            ReferenceEquals(current, AlertState) ||
+            ReferenceEquals(current, ChaseState) ||
+            ReferenceEquals(current, SearchState) ||
+            ReferenceEquals(current, AttackState) ||
+            ReferenceEquals(current, CoverState));
+        
     }
     
     private void HandlePlayerNoise(Character source, Vector3 position, float radius)
@@ -540,12 +581,45 @@ public sealed class EnemyController : MonoBehaviour
         Vector3 aimPosition = target.position + Vector3.up * targetAimHeight;
         return _weapon.TryFire(aimPosition);
     }
+
+    public bool TryEnterCover()
+    {
+        if(!isActiveAndEnabled || _stateMachine == null || _stateMachine.CurrentState == null || CoverState == null || ReferenceEquals(_stateMachine.CurrentState, CoverState) || !HasTarget || !CanSeePlayer)
+            return false;
+        IState current = _stateMachine.CurrentState;
+        if(!ReferenceEquals(current, AttackState) && !ReferenceEquals(current, ChaseState))
+            return false;
+        if(!CoverState.TryPrepare())
+            return false;
+        ChangeState(CoverState);
+        return true;
+    }
+
 #if UNITY_EDITOR
     private void OnValidate()
     {
         maxIdleDuration = Mathf.Max(minIdleDuration, maxIdleDuration);
         _viewDotThreshold = Mathf.Cos(viewAngle * 0.5f * Mathf.Deg2Rad);
         _attackAimDotThreshold = Mathf.Cos(attackAimTolerance * Mathf.Deg2Rad);
+    }
+
+    private const string EnterCoverTestMenu = "Test/Enter Cover";
+    [ContextMenu(EnterCoverTestMenu)]
+    private void TestEnterCover()
+    {
+        if (!Application.isPlaying)
+        {
+            Debug.LogWarning("Play 모드에서 실행하세요.", this);
+            return;
+        }
+
+        bool entered = TryEnterCover();
+
+        Debug.Log(
+            entered
+                ? "엄폐 상태 진입: 후보 예약 완료"
+                : "엄폐 진입 실패: 전투 상태, 시야, 후보 조건을 확인하세요.",
+            this);
     }
 #endif
 
