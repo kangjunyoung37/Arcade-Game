@@ -19,32 +19,11 @@ public sealed class EnemyIdleState : IState
         _remainingIdleTime = Random.Range(
             _owner.MinIdleDuration,
             _owner.MaxIdleDuration);
-
-        // Idle 진입 직후 바로 탐지
-        _remainingDetectionTime = 0f;
     }
 
     public void Tick(float deltaTime)
     {
-        _remainingIdleTime -= deltaTime;
-        _remainingDetectionTime -= deltaTime;
-
-        if (_remainingDetectionTime <= 0f)
-        {
-            _remainingDetectionTime = _owner.DetectionInterval;
-
-            if (_owner.CanDetectPlayer())
-            {
-                IState alertState = _owner.AlertState;
-
-                if (alertState != null)
-                {
-                    _owner.ChangeState(alertState);
-                }
-
-                return;
-            }
-        }
+      _remainingIdleTime -= deltaTime;
 
         if (_remainingIdleTime > 0f)
         {
