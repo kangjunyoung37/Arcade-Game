@@ -14,6 +14,9 @@ public class ObjectPoolManager : MonoBehaviour
     }
     public static ObjectPoolManager instance;
     
+    private readonly Dictionary<GameObject, Bullet> _bulletCache = new Dictionary<GameObject, Bullet>();
+    private readonly Dictionary<GameObject, Casing> _casingCache = new Dictionary<GameObject, Casing>();
+
     public bool IsReady { get; private set; }
     [SerializeField] private ObjectInfo[] objectInfos;
     private string _objectName;
@@ -65,11 +68,51 @@ public class ObjectPoolManager : MonoBehaviour
     
     private GameObject CreatePooledItem()
     {
-        GameObject poolGo = Instantiate(_goDic[_objectName]);
-        poolGo.GetComponent<PoolAble>().Pool = _objectPoolDic[_objectName];
+        string poolKey = _objectName;
+
+        GameObject poolGo = Instantiate(_goDic[poolKey]);
+        poolGo.GetComponent<PoolAble>().Pool = _objectPoolDic[poolKey];
+
+        if (poolGo.TryGetComponent(out Bullet bullet))
+        {
+            _bulletCache.Add(poolGo, bullet);
+        }
+        if(poolGo.TryGetComponent(out Casing casing))
+        {
+            _casingCache.Add(poolGo, casing);
+        }
         return poolGo;
     }
     
+    public Bullet GetBullet(string poolKey)
+    {
+        if(!IsReady || string.IsNullOrEmpty(poolKey))
+        {
+            return null;
+        }
+        GameObject pooledObject = GetGo(poolKey);
+        if(pooledObject == null)
+        {
+            return null;
+        }
+        if(_bulletCache.TryGetValue(pooledObject, out Bullet bullet) && bullet != null)
+        {
+            return bullet;
+        }
+        _objectPoolDic[poolKey].Release(pooledObject);
+        return null;
+    }
+    public Casing GetCasing(string poolKey)
+    {
+        if(!IsReady || string.IsNullOrEmpty(poolKey)) return null;
+
+        GameObject pooledObject = GetGo(poolKey);
+        if(pooledObject == null) return null;
+        if(_casingCache.TryGetValue(pooledObject, out Casing casing) && casing != null) return casing;
+        
+        _objectPoolDic[poolKey].Release(pooledObject);
+        return null;        
+    }
     private void OnTakeFromPool(GameObject poolGo)
     {
         poolGo.SetActive(true);
@@ -82,6 +125,12 @@ public class ObjectPoolManager : MonoBehaviour
     
     private void OnDestroyPoolObject(GameObject poolGo)
     {
+        if(poolGo == null)
+        {
+            return;
+        }
+        _bulletCache.Remove(poolGo);
+        _casingCache.Remove(poolGo);
         Destroy(poolGo);
     }
 

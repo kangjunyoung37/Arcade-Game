@@ -1,3 +1,6 @@
+using System;
+using System.Collections.Generic;
+using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.AI;
 
@@ -37,19 +40,148 @@ public sealed class EnemyController : MonoBehaviour
     [SerializeField, Range(0f, 360f)]
     private float viewAngle = 120f;
 
-    private float _viewDotThreshold;
-
-    private NavMeshAgent _agent;
-    private StateMachine _stateMachine;
-
     public float MinIdleDuration => minIdleDuration;
     public float MaxIdleDuration => maxIdleDuration;
     public float DetectionInterval => detectionInterval;
+    public float PatrolStoppingDistance => patrolStoppingDistance;
+
+    [Header("Patrol")]
+    [SerializeField] private EnemyPatrolRoute patrolRoute;
+    [SerializeField, Min(0.05f)] private float patrolStoppingDistance = 0.5f;
+    private int _nextPatrolPointIndex;
+
+    [Header("Alert")]
+    [SerializeField, Min(0f)] private float alertReactionTime = 0.5f;
+    [SerializeField, Min(0.1f)] private float alertMemoryDuration = 3f;
+    [SerializeField, Min(0f)] private float alertTrunSpeed = 240f;
+
+    [Header("Chase")]
+    [SerializeField, Min(0.02f)] private float chasePathUpdateInterval = 0.2f;
+    [SerializeField, Min(0.1f)] private float chaseMemoryDuration = 3f;
+    [SerializeField, Min(0f)] private float investigationStoppingDistance = 0.5f;
+
+    [Header("Attack")]
+    [SerializeField, Min(0.1f)] private float attackRange = 8f;
+    [SerializeField, Min(0f)] private float attackRangeBuffer = 1f;
+    [SerializeField, Range(0f, 90f)] private float attackAimTolerance = 10f;
+
+    [Header("Search")]
+    [SerializeField, Min(0.1f)] private float searchMoveTimeout = 6f;
+    [SerializeField, Min(0.1f)] private float searchLookDuration = 4f;
+    [SerializeField, Min(0.1f)] private float searchTurnSpeed = 90f;
+    [SerializeField, Min(0.1f)] private float searchStoppingDistance = 0.5f;
+    [SerializeField, Min(0.1f)] private float searchChaseRetryDelay = 1f;
+
+    [Header("Reload Decision")]
+    [SerializeField] private bool reloadWhenTargetnotVisible = true;
+    [SerializeField, Min(0f)] private float reloadAfterLostSightDelay = 2f;
+
+    [Header("Cover")]
+    [SerializeField, Min(0.1f)] private float coverMoveSpeed = 6f;
+    [SerializeField, Min(0.1f)] private float coverAcceleration = 60f;
+    [SerializeField, Min(0.1f)] private float coverMoveTimeOut = 8f;
+    [SerializeField, Min(0.1f)] private float coverHoldDuration = 3f;
+    [SerializeField, Min(0.1f)] private float coverCheckInterval = 0.25f;
+
+    private float _timeWithoutSight;
+    private float _viewDotThreshold;
+    private NavMeshAgent _agent;
+    private StateMachine _stateMachine;
+    private float _attackAimDotThreshold;
+    public event Action<Vector3> AttackRequested;
+    private const float AttackApproachRatio = 0.8f;
+    private const float FacingDirectionSqrEpsilon = 0.0001f;
+    private float _remainingPerceptionTime;
+    private bool _hasPendingNoise;
+    private Vector3 _pendingNoisePosition;
+    private EnemyWeapon _weapon;
+    private bool _hasStarted;
+
+    public float SearchMoveTimeout => searchMoveTimeout;
+    public float SearchLookDuration => searchLookDuration;
+    public float SearchTurnSpeed => searchTurnSpeed;
+    public float SearchStoppingDistance => searchStoppingDistance;
+    public float SearchChaseRetryDelay => searchChaseRetryDelay;
+
+    public float ChasePathUpdateInterval => chasePathUpdateInterval;
+    public float ChaseMemoryDuration => chaseMemoryDuration;
+
+    public float ChaseStoppingDistance => CanSeePlayer ? attackRange * AttackApproachRatio : investigationStoppingDistance;
+
+    public bool HasTarget => target != null && target.gameObject.activeInHierarchy;
+    
+    public bool CanNaviagate => _agent != null && _agent.isActiveAndEnabled && _agent.isOnNavMesh;
+    public bool IsPathPendinng => CanNaviagate && _agent.pathPending;
+    public float CoverMoveSpeed => coverMoveSpeed;
+    public float CoverAcceleration => coverAcceleration;
+    public float CoverMoveTimeout => coverMoveTimeOut;
+    public float CoverHoldDuration => coverHoldDuration;
+    public float CoverCheckInterval => coverCheckInterval;
+    
+    public EnemyStrafeMovement StrafeMovement {get; private set;}
+
+    public IState AttackState { get; private set; }
+
+
+    public bool CanSeePlayer { get; private set; }
+    public Vector3 LastKnownPlayerPosition { get; private set; }
+    public float LastStimulusTime { get; private set; }
+
+    public float AlertReactionTime => alertReactionTime;
+    public float AlertMemoryDuration => alertMemoryDuration;
+    public IState ChaseState { get; private set; }
+    public IState SearchState { get; private set; }
 
     public IState PatrolState { get; private set; }
     public IState AlertState { get; private set; }
 
     public EnemyIdleState IdleState { get; private set; }
+
+    private WeaponData EquippedWeaponData => _weapon != null ? _weapon.Data : null;
+
+    public bool HasWeaponData => EquippedWeaponData != null;
+    public int BurstCount
+    {
+        get
+        {
+            WeaponData data = EquippedWeaponData;
+            return data != null ? data.ShotsPerCycle : 1;
+        }
+    }
+
+    public float AttackInterval
+    {
+        get
+        {
+            WeaponData data = EquippedWeaponData;
+            return data != null ? data.ShotInterval : WeaponData.MinimumShotInterval;
+        }
+    }
+
+    public float BurstCooldown
+    {
+        get
+        {
+            WeaponData data = EquippedWeaponData;
+            return data != null ? data.CycleCooldown : WeaponData.MinimumShotInterval;
+        }
+    }
+    public bool AgentUpdatesRotation
+    {
+        get => _agent != null && _agent.updateRotation;
+        set
+        {
+            if(_agent != null)
+            {
+                _agent.updateRotation = value;
+            }
+        }
+    }
+
+    public EnemyCombatDecision CombatDecision {get; private set;}
+    public EnemyCoverSensor CoverSensor {get; private set;}
+    public EnemyCoverState CoverState {get; private set;}
+
 
     private void Awake()
     {
@@ -57,25 +189,69 @@ public sealed class EnemyController : MonoBehaviour
         _stateMachine = new StateMachine();
 
         _viewDotThreshold = Mathf.Cos(viewAngle * 0.5f * Mathf.Deg2Rad);
+        _attackAimDotThreshold = Mathf.Cos(attackAimTolerance * Mathf.Deg2Rad);
         IdleState = new EnemyIdleState(this);
+        PatrolState = new EnemyPatrolState(this);
+        AlertState = new EnemyAlertState(this);
+        ChaseState = new EnemyChaseState(this);
+        AttackState = new EnemyAttackState(this);
+        SearchState = new EnemySearchState(this);
+        TryGetComponent(out _weapon);
+        TryGetComponent(out EnemyStrafeMovement strafeMovement);
+        StrafeMovement = strafeMovement;
+        TryGetComponent(out EnemyCombatDecision combatDecision);
+        CombatDecision = combatDecision;
+        TryGetComponent(out EnemyCoverSensor coverSensor);
+        CoverSensor = coverSensor;
+
+        CoverState = new EnemyCoverState(this, _agent, CoverSensor);
+
     }
 
     private void Start()
     {
         TryResolvePlayerTarget();
         _stateMachine.Start(IdleState);
+        if(_stateMachine.CurrentState == null)
+            _stateMachine.Start(IdleState);
     }
 
     private void Update()
     {
-        _stateMachine.Tick(Time.deltaTime);
+        float deltaTime = Time.deltaTime;
+
+        UpdatePerception(deltaTime);
+        _stateMachine.Tick(deltaTime);
+        UpdateReloadDecision(deltaTime);
     }
 
     private void OnDestroy()
     {
-        _stateMachine.Stop();
+        _stateMachine?.Stop();
+    }
+    private void OnEnable()
+    {
+        PlayerNoise.Emitted += HandlePlayerNoise;
+        _remainingPerceptionTime = 0f;
+        _timeWithoutSight = 0f;
+        //최초 활성화때는 Start가 초기 상태 시작
+        //재활성화시 Idle 에서 시작
+        if(_hasStarted && _stateMachine != null && _stateMachine.CurrentState == null)
+        {
+            _stateMachine.Start(IdleState);
+        }
     }
 
+    private void OnDisable()
+    {
+        PlayerNoise.Emitted -= HandlePlayerNoise;
+
+        _stateMachine?.Stop();
+
+        _hasPendingNoise = false;
+        CanSeePlayer = false;
+    }
+    
     public void ChangeState(IState nextState)
     {
         _stateMachine.ChangeState(nextState);
@@ -83,7 +259,7 @@ public sealed class EnemyController : MonoBehaviour
 
     public void StopMoving()
     {
-        if (!_agent.isOnNavMesh)
+        if (!CanNaviagate)
         {
             return;
         }
@@ -188,13 +364,263 @@ public sealed class EnemyController : MonoBehaviour
 
         return dot >= _viewDotThreshold;
     }
-    public void RegisterPatrolState(IState patrolState)
+    // Patrol 관련 메서드
+    public bool TryGetNextPatrolDestination(out Vector3 destination)
     {
-        PatrolState = patrolState;
+        destination = default;
+
+        if (patrolRoute == null || patrolRoute.Count == 0)
+        {
+            return false;
+        }
+
+        int pointCount = patrolRoute.Count;
+        for(int i = 0; i < pointCount; i++)
+        {
+            int selectedIndex = _nextPatrolPointIndex;
+            _nextPatrolPointIndex = (_nextPatrolPointIndex + 1) % pointCount;
+            if(patrolRoute.TryGetPosition(selectedIndex, out destination))
+            {
+                return true;
+            }
+
+        }
+        return false;
+    }
+    //지정 목적지 이동 
+    public bool TryMoveTo(Vector3 destination, float stoppingDistance)
+    {
+        if(!CanNaviagate)
+        {
+            return false;
+        }
+        _agent.stoppingDistance = Mathf.Max(0.05f, stoppingDistance);
+        _agent.isStopped = false;
+        return _agent.SetDestination(destination);
+    }
+
+    // 도착지 판정
+    public bool HasReachedDestination()
+    {
+        if(!_agent.isOnNavMesh || _agent.pathPending)
+        {
+            return false;
+        }
+        if(_agent.remainingDistance > _agent.stoppingDistance)
+        {
+            return false;
+        }
+        return !_agent.hasPath || _agent.velocity.sqrMagnitude < 0.01f;
+    }
+
+    //경로 실패 
+    public bool HasPathFailed()
+    {
+        if(!_agent.isOnNavMesh || _agent.pathPending)
+        {
+            return false;
+        }
+        return _agent.pathStatus != NavMeshPathStatus.PathComplete;
     }
 
     public void RegisterAlertState(IState alertState)
     {
         AlertState = alertState;
     }
+
+    private bool CanProcessAlertStimuli()
+    {
+       IState current = _stateMachine.CurrentState;
+
+        return current != null && 
+        (ReferenceEquals(current, IdleState) ||
+            ReferenceEquals(current, PatrolState) ||
+            ReferenceEquals(current, AlertState) ||
+            ReferenceEquals(current, ChaseState) ||
+            ReferenceEquals(current, SearchState) ||
+            ReferenceEquals(current, AttackState) ||
+            ReferenceEquals(current, CoverState));
+        
+    }
+    
+    private void HandlePlayerNoise(Character source, Vector3 position, float radius)
+    {
+        if(!CanProcessAlertStimuli())
+        {
+            return;
+        }
+        if(!TryResolvePlayerTarget() || source == null || source.transform != target)
+        {
+            return;
+        }
+        Vector3 difference = position - transform.position;
+        if(difference.sqrMagnitude > radius * radius)
+        {
+            return;
+        }
+        _pendingNoisePosition = position;
+        _hasPendingNoise = true;
+    }
+
+    private void UpdatePerception(float deltaTime)
+    {
+        if(!CanProcessAlertStimuli())
+        {
+            _hasPendingNoise = false;
+            CanSeePlayer = false;
+            return;
+        }
+        _remainingPerceptionTime -= deltaTime;
+        if(_remainingPerceptionTime > 0f && !_hasPendingNoise)
+        {
+            return;
+        }
+        _remainingPerceptionTime = detectionInterval;
+        CanSeePlayer = CanDetectPlayer();
+
+        bool perceivedSomething  = false;
+        if (CanSeePlayer)
+        {
+            LastKnownPlayerPosition = target.position;
+            perceivedSomething = true;
+        }
+        else if(_hasPendingNoise)
+        {
+            LastKnownPlayerPosition = _pendingNoisePosition;
+            perceivedSomething = true;  
+        }
+        _hasPendingNoise = false;
+        if(!perceivedSomething)
+        {
+            return;
+        }
+        LastStimulusTime = Time.time;
+        if(_stateMachine.IsInState(IdleState) || _stateMachine.IsInState(PatrolState))
+        {
+            _stateMachine.ChangeState(AlertState);
+        }
+    }
+    private void UpdateReloadDecision(float deltaTime)
+    {
+        if(!reloadWhenTargetnotVisible || _weapon == null || !_weapon.isActiveAndEnabled)
+        {
+            _timeWithoutSight = 0f;
+            return;
+        }
+        if (CanSeePlayer)
+        {
+            _timeWithoutSight = 0f;
+            return;
+        }
+        float delay = Mathf.Max(0f, reloadAfterLostSightDelay);
+        _timeWithoutSight = Mathf.Min(_timeWithoutSight + Mathf.Max(0f, deltaTime),delay);
+        if(_timeWithoutSight < delay) return;
+        if(_weapon.CanStartReload) _weapon.TryStartReload();
+    }
+    public void FaceLastKnownPosition(float deletaTime)
+    {
+        Vector3 direction = LastKnownPlayerPosition - transform.position;
+        direction.y = 0f;
+        if(direction.sqrMagnitude <= FacingDirectionSqrEpsilon)
+        {
+            return;
+        }
+        Quaternion targetRotation = Quaternion.LookRotation(direction);
+        transform.rotation = Quaternion.RotateTowards(
+            transform.rotation,
+            targetRotation,
+            alertTrunSpeed * deletaTime);
+    }
+    public bool IsTargetInAttackRange()
+    {
+        if(!HasTarget || !CanSeePlayer)
+        {
+            return false;
+        }
+        Vector3 difference = target.position - transform.position;
+
+        return difference.sqrMagnitude <= attackRange * attackRange;
+    }
+
+    public bool IsTargetWithinAttackHoldRange()
+    {
+        if(!HasTarget)
+        {
+            return false;
+        }
+        float holdRange = attackRange + attackRangeBuffer;
+        Vector3 difference = target.position - transform.position;
+        return difference.sqrMagnitude <= holdRange * holdRange;
+    }
+    public bool TryRequestAttack()
+    {
+        if(!HasWeaponData || _weapon == null || !_weapon.CanRequestFire  || !HasTarget || !CanSeePlayer || !IsTargetWithinAttackHoldRange())
+        {
+            return false;
+        }
+        Vector3 toTarget = target.position - transform.position;
+        toTarget.y = 0f;
+        if(toTarget.sqrMagnitude > FacingDirectionSqrEpsilon)
+        {
+            Vector3 forward = transform.forward;
+            forward.y = 0f;
+            if(forward.sqrMagnitude <= FacingDirectionSqrEpsilon)
+            {
+                return false;
+            }
+            float facingDot = Vector3.Dot(forward.normalized, toTarget.normalized);
+            if(facingDot < _attackAimDotThreshold)
+            {
+                return false;
+            }
+        }
+        if (!CanDetectPlayer())
+        {
+            return false;
+        }
+        Vector3 aimPosition = target.position + Vector3.up * targetAimHeight;
+        return _weapon.TryFire(aimPosition);
+    }
+
+    public bool TryEnterCover()
+    {
+        if(!isActiveAndEnabled || _stateMachine == null || _stateMachine.CurrentState == null || CoverState == null || ReferenceEquals(_stateMachine.CurrentState, CoverState) || !HasTarget || !CanSeePlayer)
+            return false;
+        IState current = _stateMachine.CurrentState;
+        if(!ReferenceEquals(current, AttackState) && !ReferenceEquals(current, ChaseState))
+            return false;
+        if(!CoverState.TryPrepare())
+            return false;
+        ChangeState(CoverState);
+        return true;
+    }
+
+#if UNITY_EDITOR
+    private void OnValidate()
+    {
+        maxIdleDuration = Mathf.Max(minIdleDuration, maxIdleDuration);
+        _viewDotThreshold = Mathf.Cos(viewAngle * 0.5f * Mathf.Deg2Rad);
+        _attackAimDotThreshold = Mathf.Cos(attackAimTolerance * Mathf.Deg2Rad);
+    }
+
+    private const string EnterCoverTestMenu = "Test/Enter Cover";
+    [ContextMenu(EnterCoverTestMenu)]
+    private void TestEnterCover()
+    {
+        if (!Application.isPlaying)
+        {
+            Debug.LogWarning("Play 모드에서 실행하세요.", this);
+            return;
+        }
+
+        bool entered = TryEnterCover();
+
+        Debug.Log(
+            entered
+                ? "엄폐 상태 진입: 후보 예약 완료"
+                : "엄폐 진입 실패: 전투 상태, 시야, 후보 조건을 확인하세요.",
+            this);
+    }
+#endif
+
 }
