@@ -7,6 +7,8 @@ using UnityEngine.AI;
 [RequireComponent(typeof(NavMeshAgent))]
 public sealed class EnemyController : MonoBehaviour
 {
+
+    private const float MinimumCoverDecisionInterval = 0.1f;
     [Header("Idle")]
     [SerializeField, Min(0f)]
     private float minIdleDuration = 1f;
@@ -83,6 +85,14 @@ public sealed class EnemyController : MonoBehaviour
     [SerializeField, Min(0.1f)] private float coverHoldDuration = 3f;
     [SerializeField, Min(0.1f)] private float coverCheckInterval = 0.25f;
 
+    [Header("Tactical Reload")]
+    [SerializeField] private bool seekCoverWhenAmmoLow = true;
+
+    [SerializeField, Range(0f, 1f)] private float lowAmmoRatio = 0.3f;
+    [SerializeField, Min(MinimumCoverDecisionInterval)] private float coverRetryInterval = 2f;
+    [SerializeField, Min(0.1f)] private float coverReloadTimeoutMargin = 2f;
+    [SerializeField, Min(0f)] private float postReloadHoldDuration = 0.35f;
+
     private float _timeWithoutSight;
     private float _viewDotThreshold;
     private NavMeshAgent _agent;
@@ -96,6 +106,7 @@ public sealed class EnemyController : MonoBehaviour
     private Vector3 _pendingNoisePosition;
     private EnemyWeapon _weapon;
     private bool _hasStarted;
+    private float _nextCoverAttempTime;
 
     public float SearchMoveTimeout => searchMoveTimeout;
     public float SearchLookDuration => searchLookDuration;
@@ -117,6 +128,12 @@ public sealed class EnemyController : MonoBehaviour
     public float CoverMoveTimeout => coverMoveTimeOut;
     public float CoverHoldDuration => coverHoldDuration;
     public float CoverCheckInterval => coverCheckInterval;
+    public bool HasUsableWeapon => _weapon != null && _weapon.IsReadyForAI;
+    public bool WeaponNeedsReload => HasUsableWeapon && _weapon.NeedsReload;
+    public bool WeaponIsReloading => HasUsableWeapon && _weapon.IsReloading;
+    public float CoverReloadWaitLimit => HasUsableWeapon ? _weapon.EstimatedReloadWait + Mathf.Max(0.1f, coverReloadTimeoutMargin) : 0f;
+    public float PostReloadHoldDuration => Mathf.Max(0f, postReloadHoldDuration);
+
     
     public EnemyStrafeMovement StrafeMovement {get; private set;}
 
@@ -221,6 +238,8 @@ public sealed class EnemyController : MonoBehaviour
         float deltaTime = Time.deltaTime;
 
         UpdatePerception(deltaTime);
+        UpdateCoverDecision();
+
         _stateMachine.Tick(deltaTime);
         UpdateReloadDecision(deltaTime);
     }
@@ -268,31 +287,31 @@ public sealed class EnemyController : MonoBehaviour
         _agent.ResetPath();
     }
 
- public bool CanDetectPlayer()
-{
-    if (!TryResolvePlayerTarget())
+    public bool CanDetectPlayer()
     {
-        return false;
+        if (!TryResolvePlayerTarget())
+        {
+            return false;
+        }
+
+        Vector3 toTarget = target.position - transform.position;
+
+        // 1. 거리 검사
+        if (toTarget.sqrMagnitude >
+            detectionRange * detectionRange)
+        {
+            return false;
+        }
+
+        // 2. 시야각 검사
+        if (!IsWithinViewAngle(toTarget))
+        {
+            return false;
+        }
+
+        // 3. 장애물 검사
+        return HasClearLineOfSight();
     }
-
-    Vector3 toTarget = target.position - transform.position;
-
-    // 1. 거리 검사
-    if (toTarget.sqrMagnitude >
-        detectionRange * detectionRange)
-    {
-        return false;
-    }
-
-    // 2. 시야각 검사
-    if (!IsWithinViewAngle(toTarget))
-    {
-        return false;
-    }
-
-    // 3. 장애물 검사
-    return HasClearLineOfSight();
-}
 
     private bool TryResolvePlayerTarget()
     {
@@ -517,6 +536,29 @@ public sealed class EnemyController : MonoBehaviour
         if(_timeWithoutSight < delay) return;
         if(_weapon.CanStartReload) _weapon.TryStartReload();
     }
+
+    private void UpdateCoverDecision()
+    {
+        if(!seekCoverWhenAmmoLow || !HasUsableWeapon ||WeaponNeedsReload || !HasTarget || !CanSeePlayer || CoverState == null || _stateMachine == null)
+            return;
+        IState current = _stateMachine.CurrentState;
+
+        if(!ReferenceEquals(current, AttackState) && !ReferenceEquals(current, ChaseState))
+            return;
+        if(Time.time < _nextCoverAttempTime)
+            return;
+        int capacity = _weapon.LoadedCapacity;
+
+        if(capacity <= 0)
+            return;
+        float ammoRatio = _weapon.LoadedRounds / (float)capacity;
+
+        if(ammoRatio > Mathf.Clamp01(lowAmmoRatio))
+            return;
+        _nextCoverAttempTime = Time.time + Mathf.Max(MinimumCoverDecisionInterval , coverRetryInterval);
+        TryEnterCover(reloadOnArrival: true);
+
+    }
     public void FaceLastKnownPosition(float deletaTime)
     {
         Vector3 direction = LastKnownPlayerPosition - transform.position;
@@ -582,17 +624,27 @@ public sealed class EnemyController : MonoBehaviour
         return _weapon.TryFire(aimPosition);
     }
 
-    public bool TryEnterCover()
+    public bool TryEnterCover(bool reloadOnArrival = false)
     {
         if(!isActiveAndEnabled || _stateMachine == null || _stateMachine.CurrentState == null || CoverState == null || ReferenceEquals(_stateMachine.CurrentState, CoverState) || !HasTarget || !CanSeePlayer)
             return false;
         IState current = _stateMachine.CurrentState;
         if(!ReferenceEquals(current, AttackState) && !ReferenceEquals(current, ChaseState))
             return false;
-        if(!CoverState.TryPrepare())
+        if(!CoverState.TryPrepare(reloadOnArrival))
             return false;
         ChangeState(CoverState);
         return true;
+    }
+
+    public bool TryStartCoverReload()
+    {
+        return HasUsableWeapon && _weapon.CanStartReload && _weapon.TryStartReload();
+    }
+
+    public void NotifyCoverExited()
+    {
+        _nextCoverAttempTime = Time.time + Mathf.Max(MinimumCoverDecisionInterval, coverRetryInterval);
     }
 
 #if UNITY_EDITOR
