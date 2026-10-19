@@ -15779,6 +15779,11 @@ MonoBehaviour:
   searchChaseRetryDelay: 1
   reloadWhenTargetnotVisible: 1
   reloadAfterLostSightDelay: 2
+  coverMoveSpeed: 6
+  coverAcceleration: 60
+  coverMoveTimeOut: 8
+  coverHoldDuration: 3
+  coverCheckInterval: 0.25
 --- !u!195 &2039950121
 NavMeshAgent:
   m_ObjectHideFlags: 0

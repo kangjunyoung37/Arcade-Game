@@ -1,3 +1,4 @@
+using System;
 using UnityEngine;
 
 [DisallowMultipleComponent]
@@ -43,6 +44,21 @@ public sealed class EnemyWeapon : MonoBehaviour
     public bool CanRequestFire => isActiveAndEnabled && _ammoSupply != null && (_ammoSupply.CanFire || ( interruptReloadToAttack && _ammoSupply.CanInterruptReload));
     public bool CanStartReload => isActiveAndEnabled && _ammoSupply != null && _ammoSupply.CanStartReload;
 
+    public bool IsReadyForAI => isActiveAndEnabled && _ammoSupply != null;
+    public int LoadedCapacity => _ammoSupply != null ? _ammoSupply.LoadedCapacity : 0;
+    public bool NeedsReload => IsReadyForAI && LoadedCapacity > 0 && LoadedRounds < LoadedCapacity;
+
+    public float EstimatedReloadWait
+    {
+        get
+        {
+            if(!IsReadyForAI || weaponData == null)
+                return 0f;
+            int missingRounds = Mathf.Max(1, LoadedCapacity -LoadedRounds);
+            float reloadDuration = weaponData.reloadType == WeaponReloadType.InsertOneRound ? missingRounds * Mathf.Max(WeaponData.MinimumShotInterval,weaponData.insertRoundTime) : Mathf.Max(WeaponData.MinimumShotInterval, weaponData.reloadTime);
+            return reloadDuration + Mathf.Max(0f, weaponData.actionCycleTime);
+        }
+    }
     private void Awake()
     {
         if(muzzle == null || weaponData == null || reserveAmmo == null || string.IsNullOrEmpty(bulletPoolKey))
