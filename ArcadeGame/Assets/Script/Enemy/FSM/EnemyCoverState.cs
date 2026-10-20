@@ -36,6 +36,8 @@ public sealed class EnemyCoverState : IState
     private float _previousStoppingDistance;
     private bool _previousAutoBraking;
     private bool _previousUpdateRotation;
+    private bool _reloadOnArrival;
+    private float _remainingReloadWait;
 
     private bool CanNavigate => _agent != null && _agent.isActiveAndEnabled && _agent.isOnNavMesh;
     private Vector3 GroundPosition => _agent.nextPosition - Vector3.up * _agent.baseOffset;
@@ -50,7 +52,7 @@ public sealed class EnemyCoverState : IState
         _sensor = sensor;
     }
 
-    public bool TryPrepare()
+    public bool TryPrepare(bool reloadOnArrival = false)
     {
         if(_entered || _point != null || !CanNavigate || _sensor == null || !_sensor.isActiveAndEnabled || !_owner.HasTarget)
             return false;
@@ -62,6 +64,7 @@ public sealed class EnemyCoverState : IState
         _destination = destination;
         _originalPointPosition = selectedPoint.Position;
 
+        _reloadOnArrival = reloadOnArrival;
         return true;
     }
 
@@ -95,7 +98,7 @@ public sealed class EnemyCoverState : IState
         _agent.acceleration = _owner.CoverAcceleration;
         _agent.stoppingDistance = StoppingDistance;
         _agent.autoBraking = true;
-        _agent.updateRotation = true;
+        _agent.updateRotation = false;
 
         if (!_agent.SetDestination(_destination))
         {
@@ -137,14 +140,18 @@ public sealed class EnemyCoverState : IState
         if(_phase == Phase.Moving)
         {
             TickMoving(deltaTime);
+            if(!_entered || _phase != Phase.Moving)
+                return;
+
+            _owner.FaceLastKnownPosition(deltaTime);
+
+            if(!_owner.WeaponIsReloading)
+                _owner.TryRequestAttack();
             return;
         }
 
         //마지막으로 본 위치 보기
-        _owner.FaceLastKnownPosition(deltaTime);
-        _remainingHoldTime -= deltaTime;
-        if(_remainingHoldTime <= 0f)
-            ReturnToNormalBehaviour();
+        TickHolding(deltaTime);
     }
 
     private void TickMoving(float deltaTime)
@@ -173,10 +180,12 @@ public sealed class EnemyCoverState : IState
             }
 
             _owner.StopMoving();
+            _owner.PauseAttackCycle();
             _agent.updateRotation = false;
 
             _phase = Phase.Holding;
             _remainingHoldTime = _owner.CoverHoldDuration;
+            _remainingReloadWait = _reloadOnArrival ? _owner.CoverReloadWaitLimit : 0f;
             return;
         }
 
@@ -186,8 +195,52 @@ public sealed class EnemyCoverState : IState
         }
     }
 
+    private void TickHolding(float deltaTime)
+    {
+        _owner.FaceLastKnownPosition(deltaTime);
+
+        if(!_reloadOnArrival)
+        {
+            _remainingHoldTime -= deltaTime;
+            if(_remainingHoldTime <= 0f)
+                ReturnToNormalBehaviour();
+            return;
+        }
+
+        if (!_owner.HasUsableWeapon)
+        {
+            ReturnToNormalBehaviour();
+            return;
+        }
+
+        bool reloadComplete = !_owner.WeaponIsReloading && !_owner.WeaponNeedsReload;
+
+        if(reloadComplete)
+        {
+            _reloadOnArrival = false;
+            _remainingHoldTime = _owner.PostReloadHoldDuration;
+            return;
+        }
+        _remainingReloadWait -= deltaTime;
+        if(_remainingReloadWait <= 0f)
+        {
+            //재장전이 시작되지 않거나 진행이 멈춤
+            ReturnToNormalBehaviour();
+            return;
+        }
+        if (!_owner.WeaponIsReloading)
+        {
+            //볼트/펌프 작동 중이면 실패할 수 있음
+            //다음 Tick에서 다시 확인 위 제한시간까지 기다림
+            _owner.TryStartCoverReload();
+        }
+    }
+
     public void Exit()
     {
+        if(_entered)
+            _owner.NotifyCoverExited();
+
         if(_point != null)
             _point.Release(_owner);
         
@@ -206,6 +259,8 @@ public sealed class EnemyCoverState : IState
         _settingsSaved = false;
         _entered = false;
         _failed = false;
+        _reloadOnArrival = false;
+        _remainingReloadWait = 0f;
     }
 
     private void ReturnToNormalBehaviour()

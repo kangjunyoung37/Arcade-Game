@@ -7,10 +7,6 @@ public sealed class EnemyAttackState : IState
 {
     private readonly EnemyController _owner;
 
-    private int _shotsInBurst;
-
-    private float _nextAttackTime;
-
     public EnemyAttackState(EnemyController owner)
     {
         _owner = owner != null ? owner : throw new ArgumentException(nameof(owner));
@@ -19,11 +15,9 @@ public sealed class EnemyAttackState : IState
     public void Enter()
     {
         _owner.StopMoving();
-        _shotsInBurst = 0;
         if(_owner.CombatDecision != null)
-        {
             _owner.CombatDecision.ResetDecision();
-        }
+
         if(_owner.StrafeMovement != null)
             _owner.StrafeMovement.Begin();
     }
@@ -47,41 +41,18 @@ public sealed class EnemyAttackState : IState
         EnemyCombatMoveIntent intent = EnemyCombatMoveIntent.Strafe;
         if(_owner.CombatDecision != null && _owner.CombatDecision.isActiveAndEnabled)
             intent = _owner.CombatDecision.Evaluate();
-        if(_owner.StrafeMovement != null) _owner.StrafeMovement.Tick(deltaTime, intent);
+        if(_owner.StrafeMovement != null) 
+            _owner.StrafeMovement.Tick(deltaTime, intent);
 
         _owner.FaceLastKnownPosition(deltaTime);
 
-        if(Time.time < _nextAttackTime)
-        {
-            return;
-        }
-
-        if (!_owner.TryRequestAttack())
-        {
-            return;
-        }
-        RecordShotRequest();
+        //발사 가능 시점은 Controller가 공통으로 판단
+        _owner.TryRequestAttack();
     }
     public void Exit()
     {
-        if(_owner.StrafeMovement != null) _owner.StrafeMovement.End();
-        
-        if(_shotsInBurst > 0)
-        {
-            _nextAttackTime = Mathf.Max(_nextAttackTime, Time.time + _owner.BurstCooldown);
-        }
-        _shotsInBurst = 0;
-    }
-    private void RecordShotRequest()
-    {
-        _shotsInBurst++;
-        if (_shotsInBurst >= _owner.BurstCount)
-        {
-            _shotsInBurst = 0;
-            _nextAttackTime = Time.time + _owner.BurstCooldown;
-            return;
-        }
-        _nextAttackTime = Time.time + _owner.AttackInterval;
+        if(_owner.StrafeMovement != null)
+             _owner.StrafeMovement.End();
     }
 
 }

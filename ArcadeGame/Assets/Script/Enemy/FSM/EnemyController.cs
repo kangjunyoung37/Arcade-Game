@@ -1,13 +1,10 @@
 using System;
-using System.Collections.Generic;
-using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.AI;
 
 [RequireComponent(typeof(NavMeshAgent))]
 public sealed class EnemyController : MonoBehaviour
 {
-
     private const float MinimumCoverDecisionInterval = 0.1f;
     [Header("Idle")]
     [SerializeField, Min(0f)]
@@ -93,6 +90,7 @@ public sealed class EnemyController : MonoBehaviour
     [SerializeField, Min(0.1f)] private float coverReloadTimeoutMargin = 2f;
     [SerializeField, Min(0f)] private float postReloadHoldDuration = 0.35f;
 
+
     private float _timeWithoutSight;
     private float _viewDotThreshold;
     private NavMeshAgent _agent;
@@ -107,6 +105,8 @@ public sealed class EnemyController : MonoBehaviour
     private EnemyWeapon _weapon;
     private bool _hasStarted;
     private float _nextCoverAttempTime;
+    private int _shotsInAttackCycle;
+    private float _nextAttackTime;
 
     public float SearchMoveTimeout => searchMoveTimeout;
     public float SearchLookDuration => searchLookDuration;
@@ -133,7 +133,8 @@ public sealed class EnemyController : MonoBehaviour
     public bool WeaponIsReloading => HasUsableWeapon && _weapon.IsReloading;
     public float CoverReloadWaitLimit => HasUsableWeapon ? _weapon.EstimatedReloadWait + Mathf.Max(0.1f, coverReloadTimeoutMargin) : 0f;
     public float PostReloadHoldDuration => Mathf.Max(0f, postReloadHoldDuration);
-
+    public Vector3 LastKnownAimPosition => LastKnownPlayerPosition + Vector3.up * targetAimHeight;
+    public float AttackHoldRange => Mathf.Max(0f, attackRange + attackRangeBuffer);
     
     public EnemyStrafeMovement StrafeMovement {get; private set;}
 
@@ -228,7 +229,8 @@ public sealed class EnemyController : MonoBehaviour
     private void Start()
     {
         TryResolvePlayerTarget();
-        _stateMachine.Start(IdleState);
+        _hasStarted = true;
+
         if(_stateMachine.CurrentState == null)
             _stateMachine.Start(IdleState);
     }
@@ -264,7 +266,7 @@ public sealed class EnemyController : MonoBehaviour
     private void OnDisable()
     {
         PlayerNoise.Emitted -= HandlePlayerNoise;
-
+        PauseAttackCycle();
         _stateMachine?.Stop();
 
         _hasPendingNoise = false;
@@ -273,6 +275,10 @@ public sealed class EnemyController : MonoBehaviour
     
     public void ChangeState(IState nextState)
     {
+        if(!ReferenceEquals(nextState, AttackState) && !ReferenceEquals(nextState, CoverState))
+        {
+            PauseAttackCycle();
+        }
         _stateMachine.ChangeState(nextState);
     }
 
@@ -521,6 +527,11 @@ public sealed class EnemyController : MonoBehaviour
     }
     private void UpdateReloadDecision(float deltaTime)
     {
+        if(_stateMachine != null && ReferenceEquals(_stateMachine.CurrentState, CoverState))
+        {
+            _timeWithoutSight = 0f;
+            return;
+        }
         if(!reloadWhenTargetnotVisible || _weapon == null || !_weapon.isActiveAndEnabled)
         {
             _timeWithoutSight = 0f;
@@ -539,7 +550,7 @@ public sealed class EnemyController : MonoBehaviour
 
     private void UpdateCoverDecision()
     {
-        if(!seekCoverWhenAmmoLow || !HasUsableWeapon ||WeaponNeedsReload || !HasTarget || !CanSeePlayer || CoverState == null || _stateMachine == null)
+        if(!seekCoverWhenAmmoLow || !HasUsableWeapon || !WeaponNeedsReload || !HasTarget || !CanSeePlayer || CoverState == null || _stateMachine == null)
             return;
         IState current = _stateMachine.CurrentState;
 
@@ -596,6 +607,9 @@ public sealed class EnemyController : MonoBehaviour
     }
     public bool TryRequestAttack()
     {
+        if(Time.time < _nextAttackTime)
+            return false;
+
         if(!HasWeaponData || _weapon == null || !_weapon.CanRequestFire  || !HasTarget || !CanSeePlayer || !IsTargetWithinAttackHoldRange())
         {
             return false;
@@ -621,7 +635,11 @@ public sealed class EnemyController : MonoBehaviour
             return false;
         }
         Vector3 aimPosition = target.position + Vector3.up * targetAimHeight;
-        return _weapon.TryFire(aimPosition);
+
+        if(!_weapon.TryFire(aimPosition))
+            return false;
+        RecordSuccessfulAttack();
+        return true;
     }
 
     public bool TryEnterCover(bool reloadOnArrival = false)
@@ -647,6 +665,25 @@ public sealed class EnemyController : MonoBehaviour
         _nextCoverAttempTime = Time.time + Mathf.Max(MinimumCoverDecisionInterval, coverRetryInterval);
     }
 
+    public void PauseAttackCycle()
+    {
+        if(_shotsInAttackCycle > 0)
+        {
+            _nextAttackTime = Mathf.Max(_nextAttackTime, Time.time + Mathf.Max(WeaponData.MinimumShotInterval, BurstCooldown));
+        }
+        _shotsInAttackCycle = 0;
+    }
+    private void RecordSuccessfulAttack()
+    {
+        _shotsInAttackCycle++;
+        if(_shotsInAttackCycle >= Mathf.Max(1, BurstCount))
+        {
+            _shotsInAttackCycle = 0;
+            _nextAttackTime = Time.time + Mathf.Max(WeaponData.MinimumShotInterval, BurstCooldown);
+            return;
+        }
+        _nextAttackTime = Time.time + Mathf.Max(WeaponData.MinimumShotInterval, BurstCooldown);
+    }
 #if UNITY_EDITOR
     private void OnValidate()
     {
