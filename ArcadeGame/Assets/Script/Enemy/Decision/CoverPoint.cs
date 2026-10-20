@@ -5,9 +5,15 @@ using UnityEngine;
 [DisallowMultipleComponent]
 public sealed class CoverPoint : MonoBehaviour
 {
+
+    [Header("Peek Positions")]
+    [SerializeField] private Transform leftPeekPoint;
+    [SerializeField] private Transform rightPeekPoint;
     private EnemyController _reservedBy;
     public Vector3 Position => transform.position;
-
+    public Transform LeftPeekPoint => leftPeekPoint;
+    public Transform RightPeekPoint => rightPeekPoint;
+    
     public bool IsAvailableFor(EnemyController requester)
     {
         if(requester == null || !isActiveAndEnabled) return false;

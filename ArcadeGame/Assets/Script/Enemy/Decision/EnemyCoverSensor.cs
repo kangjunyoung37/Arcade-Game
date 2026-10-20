@@ -6,6 +6,27 @@ using UnityEngine;
 [RequireComponent(typeof(NavMeshAgent))]
 public sealed class EnemyCoverSensor : MonoBehaviour
 {
+
+    public enum PeekSide
+    {
+        Left,
+        Right
+    }
+
+    public enum PeekValidation
+    {
+        NotChecked,
+        Valid,
+        MissingMarker,
+        NavMeshNotFound,
+        HeightMismatch,
+        InvalidDistance,
+        NoStandingSpace,
+        NavigationBlocked,
+        MovementBlocked,
+        OutsideAttackRange,
+        SightBlocked
+    }
     private enum CoverEvaluation
     {
         Valid,
@@ -54,6 +75,9 @@ public sealed class EnemyCoverSensor : MonoBehaviour
     [SerializeField, Min(0f)] private float pathLengthWeight = 1f;
     [SerializeField, Min(0f)] private float preferredDistanceWeight = 2f;
 
+    [Header("Peeking")]
+    [SerializeField, Min(MinimumDistance)] private float maxPeekDistance = 2f;
+    [SerializeField, Min(MinimumDistance)] private float peekShotHeight = 1.2f;
 
     private readonly Vector3[] _pathCorners = new Vector3[PathCornerCapacity];
     private readonly CoverPoint[] _nearbyCandidates = new CoverPoint[CandidiateCapacity];
@@ -63,6 +87,8 @@ public sealed class EnemyCoverSensor : MonoBehaviour
     private NavMeshPath _queryPath;
     public int LastCandidateCount => _candidatedCount;
     public bool LastQueryTruncated{get; private set;}
+    public PeekValidation LastLeftPeekResult {get; private set;}
+    public PeekValidation LastRightPeekResult {get; private set;}
 
     private void Awake()
     {
@@ -226,6 +252,110 @@ public sealed class EnemyCoverSensor : MonoBehaviour
 
     }
 
+    public bool TryFindPeekPosition(CoverPoint cover, Vector3 lastKnownThreatPosition, Vector3 lastKnownAimPosition, out PeekSide side, out Vector3 destination)
+    {
+        side = PeekSide.Left;
+        destination = default;
+
+        LastLeftPeekResult = PeekValidation.NotChecked;
+        LastRightPeekResult = PeekValidation.NotChecked;
+
+        if(!isActiveAndEnabled || _owner == null || _agent == null || !_agent.isActiveAndEnabled || !_agent.isOnNavMesh || cover == null || !cover.IsAvailableFor(_owner) || coverBlockingMask.value == 0)
+            return false;
+        
+        NavMeshQueryFilter filter = new NavMeshQueryFilter
+        {
+            agentTypeID = _agent.agentTypeID,
+            areaMask = _agent.areaMask
+        };
+
+        if(!NavMesh.SamplePosition(cover.Position, out NavMeshHit coverHit, sampleRadius, filter))
+            return false;
+        if(Mathf.Abs(coverHit.position.y - cover.Position.y) > maxHeightDifference)
+            return false;
+        
+        Vector3 coverPosition = coverHit.position;
+
+        if(!IsCoverPositionSafe(coverPosition, lastKnownThreatPosition))
+            return false;
+        
+        LastLeftPeekResult = EvaluatePeekPosition(cover.LeftPeekPoint, coverPosition,lastKnownThreatPosition,lastKnownAimPosition, filter, out Vector3 leftPosition);
+        LastRightPeekResult = EvaluatePeekPosition(cover.RightPeekPoint, coverPosition,lastKnownThreatPosition,lastKnownAimPosition, filter, out Vector3 rightPosition);
+        
+        bool leftValid = LastLeftPeekResult == PeekValidation.Valid;
+        bool rightValid = LastRightPeekResult == PeekValidation.Valid;
+
+        if(!leftValid && !rightValid)
+            return false;
+        if(leftValid && !rightValid || (leftPosition - coverPosition).sqrMagnitude <= (rightPosition - coverPosition).sqrMagnitude)
+        {
+            side = PeekSide.Left;
+            destination = leftPosition;
+            return true;
+        }
+        side = PeekSide.Right;
+        destination = rightPosition;
+        return true;
+        
+    }
+
+    private PeekValidation EvaluatePeekPosition(Transform marker, Vector3 coverPosition, Vector3 threatPosition, Vector3 aimPosition, NavMeshQueryFilter filter, out Vector3 destination)
+    {
+        destination = default;
+        if(marker == null || !marker.gameObject.activeInHierarchy)
+            return PeekValidation.MissingMarker;
+        if(!NavMesh.SamplePosition(marker.position,out NavMeshHit hit, sampleRadius, filter))
+        {
+            return PeekValidation.NavMeshNotFound;
+        }
+        Vector3 candidate = hit.position;
+
+        if(Mathf.Abs(candidate.y - marker.position.y) > maxHeightDifference)
+            return PeekValidation.HeightMismatch;
+        
+        Vector3 movement = candidate - coverPosition;
+        float distanceSquared = movement.sqrMagnitude;
+        float maximumDistance = Mathf.Max(MinimumDistance, maxPeekDistance);
+
+        if(distanceSquared <= MinimumDistance * MinimumDistance || distanceSquared > maximumDistance * maximumDistance)
+            return PeekValidation.InvalidDistance;
+        
+        if(!HasStandingSpace(candidate))
+            return PeekValidation.InvalidDistance;
+        
+        if(NavMesh.Raycast(coverPosition, candidate, out _, filter))
+            return PeekValidation.NavigationBlocked;
+
+        float radius = Mathf.Max(MinimumDistance, _agent.radius);
+        float height = Mathf.Max(_agent.height, radius * CapsuleDiameterMultiplier);
+        
+        Vector3 bottom = coverPosition + Vector3.up * radius;
+        Vector3 top = coverPosition + Vector3.up * (height - radius);
+        float travelDistance = Mathf.Sqrt(distanceSquared);
+
+        if(Physics.CapsuleCast(bottom, top, radius, movement / travelDistance, travelDistance ,coverBlockingMask, QueryTriggerInteraction.Ignore))
+            return PeekValidation.MovementBlocked;
+
+        Vector3 predictedRoot = candidate + Vector3.up * _agent.baseOffset;
+
+        float attackRange = _owner.AttackHoldRange;
+
+        if((threatPosition - predictedRoot).sqrMagnitude > attackRange * attackRange)
+            return PeekValidation.OutsideAttackRange;
+        
+        Vector3 eyeProbe = candidate + Vector3.up * headHeight;
+        Vector3 shotProbe = candidate + Vector3.up * peekShotHeight;
+
+        if((aimPosition - eyeProbe).sqrMagnitude <= MinimumDistance * MinimumDistance || (aimPosition - shotProbe).sqrMagnitude <= MinimumDistance * MinimumDistance)
+            return PeekValidation.InvalidDistance;
+
+        if(IsBlocked(eyeProbe, aimPosition) || IsBlocked(shotProbe, aimPosition))
+            return PeekValidation.SightBlocked;
+        
+        destination = candidate;
+        return PeekValidation.Valid;
+    }
+
 #if UNITY_EDITOR
     private const string TestMenuName = "Test/Find Cover";
     private const float MarkerRadius = 0.2f;
@@ -345,6 +475,62 @@ public sealed class EnemyCoverSensor : MonoBehaviour
         Gizmos.color = Color.green;
         Gizmos.DrawSphere(testDestination, MarkerRadius);
         Gizmos.DrawLine(transform.position, testDestination);
+    }
+
+    private const string PeekTestMenu = "Test/Find Peek Position";
+private const float PeekDebugDuration = 5f;
+
+    [ContextMenu(PeekTestMenu)]
+    private void TestFindPeekPosition()
+    {
+        if (!Application.isPlaying ||
+            _owner == null ||
+            !_owner.HasTarget ||
+            !_owner.CanSeePlayer ||
+            testSelectedPoint == null)
+        {
+            Debug.LogWarning(
+                "Play 모드에서 플레이어가 보일 때 " +
+                "Test/Find Cover를 먼저 실행하세요.",
+                this);
+            return;
+        }
+
+        bool found = TryFindPeekPosition(
+            testSelectedPoint,
+            _owner.LastKnownPlayerPosition,
+            _owner.LastKnownAimPosition,
+            out PeekSide side,
+            out Vector3 destination);
+
+        Debug.Log(
+            $"왼쪽: {LastLeftPeekResult}, 오른쪽: {LastRightPeekResult}",
+            this);
+
+        if (!found)
+        {
+            Debug.LogWarning(
+                "피킹 후보를 찾지 못했습니다. " +
+                "양쪽이 NotChecked라면 기준 엄폐 지점부터 확인하세요.",
+                this);
+            return;
+        }
+
+        Debug.DrawLine(
+            testSelectedPoint.Position,
+            destination,
+            Color.cyan,
+            PeekDebugDuration,
+            false);
+
+        Debug.DrawLine(
+            destination + Vector3.up * peekShotHeight,
+            _owner.LastKnownAimPosition,
+            Color.green,
+            PeekDebugDuration,
+            false);
+
+        Debug.Log($"피킹 후보 선택: {side}", this);
     }
 #endif
 }
