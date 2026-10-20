@@ -2876,6 +2876,37 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 399079063}
   m_CullTransparentMesh: 1
+--- !u!1 &403732669
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 403732670}
+  m_Layer: 0
+  m_Name: PeekRight
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &403732670
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 403732669}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: -6.18, y: 0, z: -3.96}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &409774423
 GameObject:
   m_ObjectHideFlags: 0
@@ -5079,7 +5110,7 @@ GameObject:
   - component: {fileID: 693377326}
   - component: {fileID: 693377327}
   m_Layer: 0
-  m_Name: GameObject
+  m_Name: CoverPoint (1)
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -5112,6 +5143,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 7c1a39e956dfe824ba1c5e065ca99d09, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  leftPeekPoint: {fileID: 1177728815}
+  rightPeekPoint: {fileID: 403732670}
 --- !u!1 &698862212
 GameObject:
   m_ObjectHideFlags: 0
@@ -8738,7 +8771,7 @@ GameObject:
   - component: {fileID: 1171901227}
   - component: {fileID: 1171901228}
   m_Layer: 0
-  m_Name: GameObject (2)
+  m_Name: 'CoverPoint (3) '
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -8771,6 +8804,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 7c1a39e956dfe824ba1c5e065ca99d09, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  leftPeekPoint: {fileID: 0}
+  rightPeekPoint: {fileID: 0}
 --- !u!1 &1174639779
 GameObject:
   m_ObjectHideFlags: 0
@@ -8846,6 +8881,37 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1174639779}
   m_CullTransparentMesh: 1
+--- !u!1 &1177728814
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1177728815}
+  m_Layer: 0
+  m_Name: PeekLeft
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &1177728815
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1177728814}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: -6.18, y: 0, z: 4.33}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1196422797
 GameObject:
   m_ObjectHideFlags: 0
@@ -15114,7 +15180,7 @@ GameObject:
   - component: {fileID: 1991670163}
   - component: {fileID: 1991670164}
   m_Layer: 0
-  m_Name: GameObject (1)
+  m_Name: CoverPoint (2)
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -15147,6 +15213,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 7c1a39e956dfe824ba1c5e065ca99d09, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  leftPeekPoint: {fileID: 0}
+  rightPeekPoint: {fileID: 0}
 --- !u!1 &1997842671
 GameObject:
   m_ObjectHideFlags: 0
@@ -15769,7 +15837,7 @@ MonoBehaviour:
   chasePathUpdateInterval: 0.2
   chaseMemoryDuration: 3
   investigationStoppingDistance: 0.5
-  attackRange: 8
+  attackRange: 20
   attackRangeBuffer: 1
   attackAimTolerance: 10
   searchMoveTimeout: 6
@@ -15784,6 +15852,16 @@ MonoBehaviour:
   coverMoveTimeOut: 8
   coverHoldDuration: 3
   coverCheckInterval: 0.25
+  seekCoverWhenAmmoLow: 1
+  lowAmmoRatio: 0.3
+  coverRetryInterval: 2
+  coverReloadTimeoutMargin: 2
+  postReloadHoldDuration: 0.35
+  maxPeekCycles: 2
+  peekMoveTimeout: 2
+  peekExposureDuration: 1.5
+  shotsPerPeek: 3
+  peekMemoryDuration: 8
 --- !u!195 &2039950121
 NavMeshAgent:
   m_ObjectHideFlags: 0
@@ -15877,7 +15955,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 271630437cc675a40ac8f889920ba30d, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  searchRadius: 12
+  searchRadius: 8
   coverBlockingMask:
     serializedVersion: 2
     m_Bits: 1024
@@ -15886,11 +15964,13 @@ MonoBehaviour:
   threatEyeHeight: 1.5
   sampleRadius: 0.3
   maxHeightDifference: 0.3
-  maxPathLength: 24
+  maxPathLength: 8
   preferredThreatDistance: 6
   minimumThreatDistance: 4
   pathLengthWeight: 1
   preferredDistanceWeight: 2
+  maxPeekDistance: 2
+  peekShotHeight: 1.2
   testFoundCover: 0
   testSelectedPoint: {fileID: 0}
   testDestination: {x: 0, y: 0, z: 0}
@@ -16490,3 +16570,5 @@ SceneRoots:
   - {fileID: 693377326}
   - {fileID: 1991670163}
   - {fileID: 1171901227}
+  - {fileID: 1177728815}
+  - {fileID: 403732670}

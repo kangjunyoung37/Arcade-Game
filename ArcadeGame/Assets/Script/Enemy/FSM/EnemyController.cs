@@ -90,7 +90,12 @@ public sealed class EnemyController : MonoBehaviour
     [SerializeField, Min(0.1f)] private float coverReloadTimeoutMargin = 2f;
     [SerializeField, Min(0f)] private float postReloadHoldDuration = 0.35f;
 
-
+    [Header("Cover Peeking")]
+    [SerializeField, Min(1)] private int maxPeekCycles = 2;
+    [SerializeField, Min(0.1f)] private float peekMoveTimeout = 2f;
+    [SerializeField, Min(0.1f)] private float peekExposureDuration = 1.5f;
+    [SerializeField, Min(1)] private int shotsPerPeek = 3;
+    [SerializeField, Min(0.1f)] private float peekMemoryDuration = 8f;
     private float _timeWithoutSight;
     private float _viewDotThreshold;
     private NavMeshAgent _agent;
@@ -135,12 +140,15 @@ public sealed class EnemyController : MonoBehaviour
     public float PostReloadHoldDuration => Mathf.Max(0f, postReloadHoldDuration);
     public Vector3 LastKnownAimPosition => LastKnownPlayerPosition + Vector3.up * targetAimHeight;
     public float AttackHoldRange => Mathf.Max(0f, attackRange + attackRangeBuffer);
+    public float PeekmoveTimeout => Mathf.Max(0.1f, peekMoveTimeout);
+    public float PeekExposureDuration => Mathf.Max(0.1f, peekExposureDuration);
+    public int ShotsPerPeek => Mathf.Max(1, shotsPerPeek);
+    public int MaxPeekCycles => Mathf.Max(1, maxPeekCycles);
+    public float PeekMemoryDuration => Mathf.Max(0.1f, peekMemoryDuration);
+    public bool HasLoadedAmmunition => HasUsableWeapon && _weapon.LoadedRounds > 0;
     
     public EnemyStrafeMovement StrafeMovement {get; private set;}
-
     public IState AttackState { get; private set; }
-
-
     public bool CanSeePlayer { get; private set; }
     public Vector3 LastKnownPlayerPosition { get; private set; }
     public float LastStimulusTime { get; private set; }
@@ -193,6 +201,21 @@ public sealed class EnemyController : MonoBehaviour
             {
                 _agent.updateRotation = value;
             }
+        }
+    }
+    public bool ShouldReloadInCover
+    {
+        get
+        {
+            if(!HasUsableWeapon)
+                return false;
+            if(_weapon.IsReloading)
+                return true;
+            int capacity = _weapon.LoadedCapacity;
+            if(capacity <= 0 || !_weapon.NeedsReload)
+                return false;
+            float ratio = _weapon.LoadedRounds / (float)capacity;
+            return ratio <= Mathf.Clamp01(lowAmmoRatio);
         }
     }
 
@@ -635,7 +658,8 @@ public sealed class EnemyController : MonoBehaviour
             return false;
         }
         Vector3 aimPosition = target.position + Vector3.up * targetAimHeight;
-
+        if(!_weapon.HasClearShot(aimPosition, sightBlockingMask))
+            return false;
         if(!_weapon.TryFire(aimPosition))
             return false;
         RecordSuccessfulAttack();

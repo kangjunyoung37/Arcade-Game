@@ -6,8 +6,11 @@ public sealed class EnemyCoverState : IState
 {
     private enum Phase
     {
-        Moving,
-        Holding
+        Moving,         // 처음 엄폐로 이동
+        Holding,        // 엄폐 대기,재장전
+        MovingToPeek,   // 피킹 위치로 이동
+        Firing,         // 피킹 사격
+        Returning       // 원래 엄폐로 복귀
     }
 
     private const float StoppingDistance = 0.1f;
@@ -20,24 +23,28 @@ public sealed class EnemyCoverState : IState
 
     private CoverPoint _point;
     private Vector3 _destination;
+    private Vector3 _peekDestination;
     private Vector3 _originalPointPosition;
 
     private Phase _phase;
+    private float _remainingMoveTime;
+    private float _remainingHoldTime;
+    private float _remainingCheckTime;
+    private float _previoudSpeed;
+    private float _previousAcceleration;
+    private float _previousStoppingDistance;
+    private float _remainingReloadWait;
+    private float _remainingPeekTime;
+
+    private bool _previousAutoBraking;
+    private bool _previousUpdateRotation;
+    private bool _reloadOnArrival;
     private bool _entered;
     private bool _failed;
     private bool _settingsSaved;
 
-    private float _remainingMoveTime;
-    private float _remainingHoldTime;
-    private float _remainingCheckTime;
-
-    private float _previoudSpeed;
-    private float _previousAcceleration;
-    private float _previousStoppingDistance;
-    private bool _previousAutoBraking;
-    private bool _previousUpdateRotation;
-    private bool _reloadOnArrival;
-    private float _remainingReloadWait;
+    private int _shotsthisPeek;
+    private int _peekCycles;
 
     private bool CanNavigate => _agent != null && _agent.isActiveAndEnabled && _agent.isOnNavMesh;
     private Vector3 GroundPosition => _agent.nextPosition - Vector3.up * _agent.baseOffset;
@@ -74,6 +81,9 @@ public sealed class EnemyCoverState : IState
         _failed = false;
         _settingsSaved = false;
         _phase = Phase.Moving;
+        _peekCycles = 0;
+        _shotsthisPeek = 0;
+        _remainingPeekTime = 0f;
 
         _remainingMoveTime = _owner.CoverMoveTimeout;
         _remainingHoldTime = _owner.CoverHoldDuration;
@@ -129,7 +139,7 @@ public sealed class EnemyCoverState : IState
         {
             _remainingCheckTime = _owner.CoverCheckInterval;;
 
-            Vector3 positionToCheck = _phase == Phase.Moving ? _destination : GroundPosition;
+            Vector3 positionToCheck = _phase == Phase.Holding ? GroundPosition : _destination;
             if(!_sensor.IsCoverPositionSafe(positionToCheck, _owner.LastKnownPlayerPosition))
             {
                 ReturnToNormalBehaviour();
@@ -137,21 +147,28 @@ public sealed class EnemyCoverState : IState
             }
         }
 
-        if(_phase == Phase.Moving)
+        switch (_phase)
         {
-            TickMoving(deltaTime);
-            if(!_entered || _phase != Phase.Moving)
-                return;
+            case Phase.Moving:
+            case Phase.MovingToPeek:
+            case Phase.Returning:
+                _owner.FaceLastKnownPosition(deltaTime);
+                TickMoving(deltaTime);
+                //최초 엄폐 진입 중의 이동사격만 유지
+                //피킹 이동 중에는 쏘지 않고 도착 후 사격
+                if(_entered && _phase == Phase.Moving && !_owner.WeaponIsReloading)
+                {
+                    _owner.TryRequestAttack();
+                }
+                break;
+            case Phase.Holding:
+                TickHolding(deltaTime);
+                break;
+            case Phase.Firing:
+                TickPeekFiring(deltaTime);
+                break;
 
-            _owner.FaceLastKnownPosition(deltaTime);
-
-            if(!_owner.WeaponIsReloading)
-                _owner.TryRequestAttack();
-            return;
         }
-
-        //마지막으로 본 위치 보기
-        TickHolding(deltaTime);
     }
 
     private void TickMoving(float deltaTime)
@@ -166,26 +183,23 @@ public sealed class EnemyCoverState : IState
 
         if(_agent.pathPending)
             return;
-        bool closeEnough = (GroundPosition - _destination).sqrMagnitude <= ArrivalTolerance * ArrivalTolerance;
+        Vector3 moveDestination = _phase == Phase.MovingToPeek ? _peekDestination : _destination;
+
+        bool closeEnough = (GroundPosition - moveDestination).sqrMagnitude <= ArrivalTolerance * ArrivalTolerance;
 
         bool arrived = closeEnough && (!_agent.hasPath || (_agent.pathStatus == NavMeshPathStatus.PathComplete && _agent.remainingDistance <= StoppingDistance));
 
         if (arrived)
         {
-            //실제가 간 위치도 엄폐 조건을 만족해야함
-            if(!_sensor.IsCoverPositionSafe(GroundPosition, _owner.LastKnownPlayerPosition))
+            if(_phase == Phase.MovingToPeek)
             {
-                ReturnToNormalBehaviour();
+                _owner.StopMoving();
+                _phase = Phase.Firing;
+                _shotsthisPeek = 0;
+                _remainingPeekTime = _owner.PeekExposureDuration;
                 return;
             }
-
-            _owner.StopMoving();
-            _owner.PauseAttackCycle();
-            _agent.updateRotation = false;
-
-            _phase = Phase.Holding;
-            _remainingHoldTime = _owner.CoverHoldDuration;
-            _remainingReloadWait = _reloadOnArrival ? _owner.CoverReloadWaitLimit : 0f;
+            BeginHolding();
             return;
         }
 
@@ -195,6 +209,45 @@ public sealed class EnemyCoverState : IState
         }
     }
 
+    private void HandleMovmeentFailure()
+    {
+        if(_phase == Phase.MovingToPeek)
+        {
+            BeginReturnToCover();
+            return;
+        }
+        ReturnToNormalBehaviour();
+    }
+
+    private void BeginHolding()
+    {
+        if(!_sensor.IsCoverPositionSafe(GroundPosition, _owner.LastKnownPlayerPosition))
+        {
+            ReturnToNormalBehaviour();
+            return;
+        }
+        _owner.StopMoving();
+        _owner.PauseAttackCycle();
+
+        _phase = Phase.Holding;
+        _remainingHoldTime = _owner.CoverHoldDuration;
+
+        //최초 진입 목적과 피킹 후 탄약 상태를 함께 반영한다
+        _reloadOnArrival = _reloadOnArrival || _owner.ShouldReloadInCover;
+        _remainingReloadWait = _reloadOnArrival ? _owner.CoverReloadWaitLimit : 0f;
+    }
+
+    private bool BeginMove(Phase nextPhase, Vector3 destination, float timeout)
+    {
+        _owner.StopMoving();
+        if(!_agent.SetDestination(destination))
+            return false;
+        _phase = nextPhase;
+        _remainingMoveTime = timeout;
+        _agent.isStopped = false;
+        
+        return true;
+    }
     private void TickHolding(float deltaTime)
     {
         _owner.FaceLastKnownPosition(deltaTime);
@@ -203,7 +256,7 @@ public sealed class EnemyCoverState : IState
         {
             _remainingHoldTime -= deltaTime;
             if(_remainingHoldTime <= 0f)
-                ReturnToNormalBehaviour();
+                BeginPeekOrFinish();
             return;
         }
 
@@ -236,10 +289,76 @@ public sealed class EnemyCoverState : IState
         }
     }
 
+    private void BeginPeekOrFinish()
+    {
+        bool memoryExpired = !_owner.CanSeePlayer && Time.time - _owner.LastStimulusTime > _owner.PeekMemoryDuration;
+        if(_peekCycles >= _owner.MaxPeekCycles || memoryExpired)
+        {
+            ReturnToNormalBehaviour();
+            return;
+        }
+        if (_owner.ShouldReloadInCover)
+        {
+            _reloadOnArrival = true;
+            _remainingReloadWait = _owner.CoverReloadWaitLimit;
+            return;
+        }
+        if(!_sensor.TryFindPeekPosition(_point, _owner.LastKnownPlayerPosition, _owner.LastKnownAimPosition, out _, out Vector3 peekPosition))
+        {
+            ReturnToNormalBehaviour();
+            return;
+        }
+
+        _peekDestination = peekPosition;
+        if(!BeginMove(Phase.MovingToPeek, _peekDestination, _owner.PeekmoveTimeout))
+        {
+            ReturnToNormalBehaviour();
+            return;
+        }
+        _peekCycles++;
+    }
+
+    private void TickPeekFiring(float deltaTime)
+    {
+        _owner.FaceLastKnownPosition(deltaTime);
+        _remainingPeekTime -= deltaTime;
+        
+        if(_remainingPeekTime <= 0f || _owner.WeaponIsReloading || !_owner.HasLoadedAmmunition)
+        {
+            BeginReturnToCover();
+            return;
+        }
+        // 실제 시야, 조준, 공격 거리, 총구 장애물,
+        // 무기별 발사 간격은 공통 사격 함수에서 검사한다.
+        if(!_owner.TryRequestAttack())
+            return;
+        _shotsthisPeek++;
+        if(_shotsthisPeek >= _owner.ShotsPerPeek)
+            BeginReturnToCover();
+        
+    }
+
+    private void BeginReturnToCover()
+    {
+        _owner.PauseAttackCycle();
+
+        if(!_sensor.IsCoverPositionSafe(_destination, _owner.LastKnownPlayerPosition))
+        {
+            ReturnToNormalBehaviour();
+            return;
+        }
+        if(!BeginMove(Phase.Returning, _destination,_owner.PeekmoveTimeout))
+        {
+            ReturnToNormalBehaviour();
+        }
+    }
     public void Exit()
     {
         if(_entered)
-            _owner.NotifyCoverExited();
+        {
+            _owner.PauseAttackCycle();
+            _owner.NotifyCoverExited();            
+        }
 
         if(_point != null)
             _point.Release(_owner);

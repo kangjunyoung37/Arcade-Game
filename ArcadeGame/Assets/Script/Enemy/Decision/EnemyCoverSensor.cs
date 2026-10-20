@@ -321,7 +321,7 @@ public sealed class EnemyCoverSensor : MonoBehaviour
             return PeekValidation.InvalidDistance;
         
         if(!HasStandingSpace(candidate))
-            return PeekValidation.InvalidDistance;
+            return PeekValidation.NoStandingSpace;
         
         if(NavMesh.Raycast(coverPosition, candidate, out _, filter))
             return PeekValidation.NavigationBlocked;

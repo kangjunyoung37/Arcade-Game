@@ -7,6 +7,7 @@ public sealed class EnemyWeapon : MonoBehaviour
 {
     private const string DefaultBulletPoolKey = "EnemyBullet";
     private const string DefaultCasingPoolKey = "Casing";
+    private const float MuzzleClearanceRadius = 0.02f;
     private const float DirectionSqrEpsilon = 0.0001f;
     [Header("References")]
     [SerializeField] private Transform muzzle;
@@ -180,6 +181,19 @@ public sealed class EnemyWeapon : MonoBehaviour
         return true;
     }
 
+    public bool HasClearShot(Vector3 aimPosition, LayerMask blockingMask)
+    {
+        if(!isActiveAndEnabled || muzzle == null)
+            return false;
+        Vector3 muzzlePosition = muzzle.position;
+        if(Physics.CheckSphere(muzzlePosition,MuzzleClearanceRadius, blockingMask,QueryTriggerInteraction.Ignore))
+            return false;
+        Vector3 bodyPosition = transform.position;
+        bodyPosition.y = muzzlePosition.y;
+        if(Physics.Linecast(bodyPosition,muzzlePosition,blockingMask,QueryTriggerInteraction.Ignore))
+            return false;
+        return !Physics.Linecast(muzzlePosition,aimPosition,blockingMask,QueryTriggerInteraction.Ignore);
+    }
     public bool TryStartReload()
     {
         if(!CanStartReload) return false;
