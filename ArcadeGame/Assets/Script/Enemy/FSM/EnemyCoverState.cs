@@ -43,6 +43,7 @@ public sealed class EnemyCoverState : IState
     private bool _failed;
     private bool _settingsSaved;
     private bool _hasPreviousPeekSide;
+    private bool _isFastCoverMove;
     private int _shotsthisPeek;
     private int _peekCycles;
     private EnemyCoverSensor.PeekSide _previousPeekSide;
@@ -50,7 +51,7 @@ public sealed class EnemyCoverState : IState
     private Vector3 GroundPosition => _agent.nextPosition - Vector3.up * _agent.baseOffset;
 
     public bool IsHolding => _entered && _phase == Phase.Holding;
-    
+    public bool IsFastCoverMove => _entered && _isFastCoverMove;   
     public EnemyCoverState(EnemyController onwer, NavMeshAgent agent, EnemyCoverSensor sensor)
     {
         _owner = onwer != null ? onwer : throw new ArgumentNullException(nameof(onwer));
@@ -81,6 +82,7 @@ public sealed class EnemyCoverState : IState
         _failed = false;
         _settingsSaved = false;
         _phase = Phase.Moving;
+        _isFastCoverMove = false;
         _peekCycles = 0;
         _hasPreviousPeekSide = false;
         _shotsthisPeek = 0;
@@ -193,9 +195,11 @@ public sealed class EnemyCoverState : IState
 
         if (arrived)
         {
+            ResetCoverMoveSpeed();
             if(_phase == Phase.MovingToPeek)
             {
                 _owner.StopMoving();
+
                 _phase = Phase.Firing;
                 _shotsthisPeek = 0;
                 _remainingPeekTime = _owner.PeekExposureDuration;
@@ -207,8 +211,10 @@ public sealed class EnemyCoverState : IState
 
         if(!_agent.hasPath || _agent.pathStatus != NavMeshPathStatus.PathComplete)
         {
-            ReturnToNormalBehaviour();
+            HandleMovmeentFailure();
+            return;
         }
+        UpdateCoverMoveSpeed();
     }
 
     private void HandleMovmeentFailure()
@@ -241,6 +247,7 @@ public sealed class EnemyCoverState : IState
     private bool BeginMove(Phase nextPhase, Vector3 destination, float timeout)
     {
         _owner.StopMoving();
+        ResetCoverMoveSpeed();
         if(!_agent.SetDestination(destination))
             return false;
         _phase = nextPhase;
@@ -396,6 +403,7 @@ public sealed class EnemyCoverState : IState
         _failed = false;
         _reloadOnArrival = false;
         _remainingReloadWait = 0f;
+        _isFastCoverMove = false;
     }
 
     private void ReturnToNormalBehaviour()
@@ -415,4 +423,44 @@ public sealed class EnemyCoverState : IState
         _owner.ChangeState(_owner.SearchState ?? _owner.IdleState);
     }
 
+    private void ResetCoverMoveSpeed()
+    {
+        _isFastCoverMove = false;
+        if(!CanNavigate)
+            return;
+        float speed = _owner.CoverMoveSpeed;
+        if(!Mathf.Approximately(_agent.speed, speed))
+            _agent.speed = speed;
+        
+    }
+    private void UpdateCoverMoveSpeed()
+    {
+        if(_phase != Phase.Moving)
+        {
+            ResetCoverMoveSpeed();
+            return;
+        }
+        float remainingDistance = _agent.remainingDistance;
+
+        if(float.IsInfinity(remainingDistance) || float.IsNaN(remainingDistance))
+        {
+            ResetCoverMoveSpeed();
+            return;
+        }
+        if(_isFastCoverMove)
+        {
+            if(remainingDistance <= _owner.CoverFastMoveExitDistance)
+                _isFastCoverMove = false;
+        }
+        else
+        {
+            if(remainingDistance >= _owner.CoverFastMoveEnterDistance)
+                _isFastCoverMove = true;
+        }
+        float targetSpeed = _isFastCoverMove ? _owner.CoverFastMoveSpeed : _owner.CoverMoveSpeed;
+
+        if(!Mathf.Approximately(_agent.speed, targetSpeed))
+            _agent.speed = targetSpeed;
+
+    }
 }

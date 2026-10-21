@@ -8,6 +8,9 @@ public sealed class EnemyController : MonoBehaviour
 {
     private const float MinimumCoverHoldDuration = 0.1f;
     private const float MinimumCoverDecisionInterval = 0.1f;
+    private const float MinimumCoverMoveSpeed = 0.1f;
+    private const float MinimumFastMoveDistanceGap = 0.5f;
+
     [Header("Idle")]
     [SerializeField, Min(0f)]
     private float minIdleDuration = 1f;
@@ -103,9 +106,14 @@ public sealed class EnemyController : MonoBehaviour
     [Tooltip("기존 엄폐 대기 시간에 더하거나 빼는 최대 시간")]
     [SerializeField, Min(0f)] private float coverHoldJitter = 0.8f;
     
-    [Header("Cloase Footstep Reation")]
+    [Header("Close Footstep Reation")]
     [SerializeField, Min(0.1f)] private float closeFootstepDistance = 4f;
     [SerializeField, Min(0.1f)] private float closeFootstepMemoryDuration = 1.5f;
+    
+    [Header("Cover Fast Movement")]
+    [SerializeField, Min(MinimumCoverMoveSpeed)] private float coverFastMoveSpeed = 8f;
+    [SerializeField, Min(MinimumFastMoveDistanceGap)] private float coverFastMoveEnterDistance = 5f;
+    [SerializeField, Min(MinimumFastMoveDistanceGap)] private float coverFastMoveExitDistance = 2f;
 
     private float _timeWithoutSight;
     private float _viewDotThreshold;
@@ -160,6 +168,9 @@ public sealed class EnemyController : MonoBehaviour
     public float PeekMemoryDuration => Mathf.Max(0.1f, peekMemoryDuration);
     public bool HasLoadedAmmunition => HasUsableWeapon && _weapon.LoadedRounds > 0;
     public float PeekSideSwithChance => Mathf.Clamp01(peekSideSwithChance);
+    public float CoverFastMoveSpeed => Mathf.Max(MinimumCoverMoveSpeed, Mathf.Max(coverMoveSpeed, coverFastMoveSpeed));
+    public float CoverFastMoveExitDistance => Mathf.Max(MinimumFastMoveDistanceGap, coverFastMoveExitDistance);
+    public float CoverFastMoveEnterDistance => Mathf.Max(CoverFastMoveExitDistance + MinimumFastMoveDistanceGap, coverFastMoveEnterDistance);
     
     public EnemyStrafeMovement StrafeMovement {get; private set;}
     public IState AttackState { get; private set; }
