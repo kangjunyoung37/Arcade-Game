@@ -16,7 +16,7 @@ public sealed class EnemyCoverState : IState
     private const float StoppingDistance = 0.1f;
     private const float ArrivalTolerance = 0.25f;
     private const float PointMovementTolerance = 0.05f;
-
+    private const float InitialLeftPeekChance = 0.5f;
     private readonly EnemyController _owner;
     private readonly NavMeshAgent _agent;
     private readonly EnemyCoverSensor _sensor;
@@ -42,10 +42,10 @@ public sealed class EnemyCoverState : IState
     private bool _entered;
     private bool _failed;
     private bool _settingsSaved;
-
+    private bool _hasPreviousPeekSide;
     private int _shotsthisPeek;
     private int _peekCycles;
-
+    private EnemyCoverSensor.PeekSide _previousPeekSide;
     private bool CanNavigate => _agent != null && _agent.isActiveAndEnabled && _agent.isOnNavMesh;
     private Vector3 GroundPosition => _agent.nextPosition - Vector3.up * _agent.baseOffset;
 
@@ -82,6 +82,7 @@ public sealed class EnemyCoverState : IState
         _settingsSaved = false;
         _phase = Phase.Moving;
         _peekCycles = 0;
+        _hasPreviousPeekSide = false;
         _shotsthisPeek = 0;
         _remainingPeekTime = 0f;
 
@@ -127,7 +128,8 @@ public sealed class EnemyCoverState : IState
             ReturnToNormalBehaviour();
             return;
         }
-
+        if(_owner.TryReactToCloseFootstepFromCover())
+            return;
         if((_point.Position - _originalPointPosition).sqrMagnitude > PointMovementTolerance * PointMovementTolerance)
         {
             ReturnToNormalBehaviour();
@@ -230,8 +232,7 @@ public sealed class EnemyCoverState : IState
         _owner.PauseAttackCycle();
 
         _phase = Phase.Holding;
-        _remainingHoldTime = _owner.CoverHoldDuration;
-
+        _remainingHoldTime = _owner.SampleCoverHoldDuration();
         //최초 진입 목적과 피킹 후 탄약 상태를 함께 반영한다
         _reloadOnArrival = _reloadOnArrival || _owner.ShouldReloadInCover;
         _remainingReloadWait = _reloadOnArrival ? _owner.CoverReloadWaitLimit : 0f;
@@ -303,7 +304,9 @@ public sealed class EnemyCoverState : IState
             _remainingReloadWait = _owner.CoverReloadWaitLimit;
             return;
         }
-        if(!_sensor.TryFindPeekPosition(_point, _owner.LastKnownPlayerPosition, _owner.LastKnownAimPosition, out _, out Vector3 peekPosition))
+        EnemyCoverSensor.PeekSide preferredSide = SelectPreferredPeekSide();
+
+        if(!_sensor.TryFindPeekPosition(_point, _owner.LastKnownPlayerPosition, _owner.LastKnownAimPosition, out EnemyCoverSensor.PeekSide selectedSide, out Vector3 peekPosition, preferredSide))
         {
             ReturnToNormalBehaviour();
             return;
@@ -315,6 +318,9 @@ public sealed class EnemyCoverState : IState
             ReturnToNormalBehaviour();
             return;
         }
+        // 선호한 방향이 아니라 실제 이동을 시작한 방향을 기억
+        _previousPeekSide = selectedSide;
+        _hasPreviousPeekSide = true;
         _peekCycles++;
     }
 
@@ -351,6 +357,16 @@ public sealed class EnemyCoverState : IState
         {
             ReturnToNormalBehaviour();
         }
+    }
+
+    private EnemyCoverSensor.PeekSide SelectPreferredPeekSide()
+    {
+        if (!_hasPreviousPeekSide)
+            return UnityEngine.Random.value < InitialLeftPeekChance ? EnemyCoverSensor.PeekSide.Left : EnemyCoverSensor.PeekSide.Right;
+        bool switchSide = UnityEngine.Random.value < _owner.PeekSideSwithChance;
+        if(!switchSide)
+            return _previousPeekSide;
+        return _previousPeekSide == EnemyCoverSensor.PeekSide.Left ? EnemyCoverSensor.PeekSide.Right : EnemyCoverSensor.PeekSide.Left;
     }
     public void Exit()
     {
