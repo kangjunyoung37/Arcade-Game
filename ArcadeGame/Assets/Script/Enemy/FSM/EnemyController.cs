@@ -1,10 +1,12 @@
 using System;
+using UnityEditor.Rendering;
 using UnityEngine;
 using UnityEngine.AI;
 
 [RequireComponent(typeof(NavMeshAgent))]
 public sealed class EnemyController : MonoBehaviour
 {
+    private const float MinimumCoverHoldDuration = 0.1f;
     private const float MinimumCoverDecisionInterval = 0.1f;
     [Header("Idle")]
     [SerializeField, Min(0f)]
@@ -96,6 +98,15 @@ public sealed class EnemyController : MonoBehaviour
     [SerializeField, Min(0.1f)] private float peekExposureDuration = 1.5f;
     [SerializeField, Min(1)] private int shotsPerPeek = 3;
     [SerializeField, Min(0.1f)] private float peekMemoryDuration = 8f;
+    [Tooltip("양쪽 모두 피킹 가능할 때 이전과 반대쪽을 선호할 확률")]
+    [SerializeField, Range(0f, 1f)] private float peekSideSwithChance = 0.7f;
+    [Tooltip("기존 엄폐 대기 시간에 더하거나 빼는 최대 시간")]
+    [SerializeField, Min(0f)] private float coverHoldJitter = 0.8f;
+    
+    [Header("Cloase Footstep Reation")]
+    [SerializeField, Min(0.1f)] private float closeFootstepDistance = 4f;
+    [SerializeField, Min(0.1f)] private float closeFootstepMemoryDuration = 1.5f;
+
     private float _timeWithoutSight;
     private float _viewDotThreshold;
     private NavMeshAgent _agent;
@@ -112,6 +123,8 @@ public sealed class EnemyController : MonoBehaviour
     private float _nextCoverAttempTime;
     private int _shotsInAttackCycle;
     private float _nextAttackTime;
+    private Vector3 _lastheardFootstepPosition;
+    private float _lastHeardFootstepTime = float.NegativeInfinity;
 
     public float SearchMoveTimeout => searchMoveTimeout;
     public float SearchLookDuration => searchLookDuration;
@@ -146,6 +159,7 @@ public sealed class EnemyController : MonoBehaviour
     public int MaxPeekCycles => Mathf.Max(1, maxPeekCycles);
     public float PeekMemoryDuration => Mathf.Max(0.1f, peekMemoryDuration);
     public bool HasLoadedAmmunition => HasUsableWeapon && _weapon.LoadedRounds > 0;
+    public float PeekSideSwithChance => Mathf.Clamp01(peekSideSwithChance);
     
     public EnemyStrafeMovement StrafeMovement {get; private set;}
     public IState AttackState { get; private set; }
@@ -291,9 +305,10 @@ public sealed class EnemyController : MonoBehaviour
         PlayerNoise.Emitted -= HandlePlayerNoise;
         PauseAttackCycle();
         _stateMachine?.Stop();
-
+    
         _hasPendingNoise = false;
         CanSeePlayer = false;
+        _lastHeardFootstepTime = float.NegativeInfinity;
     }
     
     public void ChangeState(IState nextState)
@@ -341,7 +356,43 @@ public sealed class EnemyController : MonoBehaviour
         // 3. 장애물 검사
         return HasClearLineOfSight();
     }
+    public bool TryGetRecentCloseFootstep(out Vector3 position)
+    {
+        position = default;
+        if(!HasTarget)
+            return false;
+        float age = Time.time - _lastHeardFootstepTime;
+        if(age > closeFootstepMemoryDuration)
+            return false;
+        Vector3 difference = _lastheardFootstepPosition - transform.position;
 
+        float distanceSquared = closeFootstepDistance * closeFootstepDistance;
+        if(difference.sqrMagnitude > distanceSquared)
+            return false;
+        position = _lastheardFootstepPosition;
+        return true;
+    }
+
+    public bool TryReactToCloseFootstepFromCover()
+    {
+        if(_stateMachine == null || CoverState == null || !ReferenceEquals(_stateMachine.CurrentState, CoverState))
+            return false;
+        if(!TryGetRecentCloseFootstep(out Vector3 heardPosition))
+            return false;
+        IState nextState;
+        if(CanSeePlayer)
+            nextState = IsTargetWithinAttackHoldRange() ? AttackState : ChaseState;
+        else
+        {
+            LastKnownPlayerPosition = heardPosition;
+            LastStimulusTime = _lastHeardFootstepTime;
+            nextState = AlertState;
+        }
+        if(nextState == null)
+            return false;
+        ChangeState(nextState);
+        return true;
+    }
     private bool TryResolvePlayerTarget()
     {
         if (target != null)
@@ -491,9 +542,9 @@ public sealed class EnemyController : MonoBehaviour
         
     }
     
-    private void HandlePlayerNoise(Character source, Vector3 position, float radius)
+    private void HandlePlayerNoise(Character source, Vector3 position, float radius,PlayerNoiseType type)
     {
-        if(!CanProcessAlertStimuli())
+        if(_stateMachine == null || !CanProcessAlertStimuli())
         {
             return;
         }
@@ -508,6 +559,14 @@ public sealed class EnemyController : MonoBehaviour
         }
         _pendingNoisePosition = position;
         _hasPendingNoise = true;
+
+        //발소리만 별로도 기억
+        //뒤이어 총소리가 발생해도 발소리 기록은 그대로
+        if(type == PlayerNoiseType.Footstep)
+        {
+            _lastheardFootstepPosition = position;
+            _lastHeardFootstepTime = Time.time;
+        }
     }
 
     private void UpdatePerception(float deltaTime)
@@ -670,6 +729,8 @@ public sealed class EnemyController : MonoBehaviour
     {
         if(!isActiveAndEnabled || _stateMachine == null || _stateMachine.CurrentState == null || CoverState == null || ReferenceEquals(_stateMachine.CurrentState, CoverState) || !HasTarget || !CanSeePlayer)
             return false;
+        if(TryGetRecentCloseFootstep(out _))
+            return false;
         IState current = _stateMachine.CurrentState;
         if(!ReferenceEquals(current, AttackState) && !ReferenceEquals(current, ChaseState))
             return false;
@@ -707,6 +768,15 @@ public sealed class EnemyController : MonoBehaviour
             return;
         }
         _nextAttackTime = Time.time + Mathf.Max(WeaponData.MinimumShotInterval, BurstCooldown);
+    }
+
+    public float SampleCoverHoldDuration()
+    {
+        float baseDuration = Mathf.Max(MinimumCoverHoldDuration, coverHoldDuration);
+        float jitter = Mathf.Max(0f, coverHoldJitter);
+        float minimum = Mathf.Max(MinimumCoverHoldDuration,baseDuration - jitter);
+        float maximum = baseDuration + jitter;
+        return UnityEngine.Random.Range(minimum, maximum);
     }
 #if UNITY_EDITOR
     private void OnValidate()

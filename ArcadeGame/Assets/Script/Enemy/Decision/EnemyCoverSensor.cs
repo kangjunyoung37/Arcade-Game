@@ -252,7 +252,7 @@ public sealed class EnemyCoverSensor : MonoBehaviour
 
     }
 
-    public bool TryFindPeekPosition(CoverPoint cover, Vector3 lastKnownThreatPosition, Vector3 lastKnownAimPosition, out PeekSide side, out Vector3 destination)
+    public bool TryFindPeekPosition(CoverPoint cover, Vector3 lastKnownThreatPosition, Vector3 lastKnownAimPosition, out PeekSide side, out Vector3 destination, PeekSide? preferredSide = null)
     {
         side = PeekSide.Left;
         destination = default;
@@ -287,14 +287,20 @@ public sealed class EnemyCoverSensor : MonoBehaviour
 
         if(!leftValid && !rightValid)
             return false;
-        if(leftValid && !rightValid || (leftPosition - coverPosition).sqrMagnitude <= (rightPosition - coverPosition).sqrMagnitude)
+        bool chooseLeft;
+        if (!rightValid)
+            chooseLeft = true;
+        else if(!leftValid)
+            chooseLeft = false;
+        else if(preferredSide.HasValue)
+            chooseLeft = preferredSide.Value == PeekSide.Left;
+        else
         {
-            side = PeekSide.Left;
-            destination = leftPosition;
-            return true;
+            chooseLeft = (leftPosition - coverPosition).sqrMagnitude <= (rightPosition - coverPosition).sqrMagnitude;
         }
-        side = PeekSide.Right;
-        destination = rightPosition;
+        side = chooseLeft ? PeekSide.Left : PeekSide.Right;
+        destination = chooseLeft ? leftPosition : rightPosition;
+        
         return true;
         
     }
