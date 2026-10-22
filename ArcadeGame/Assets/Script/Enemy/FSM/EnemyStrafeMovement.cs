@@ -32,13 +32,19 @@ public class EnemyStrafeMovement : MonoBehaviour
     [Header("NavMesh Validation")]
     [SerializeField, Min(0.05f)] private float sampleRadius = 0.4f;
     [SerializeField, Min(0f)] private float maxHeightDifference = 0.5f;
+    
+    [Header("Apprach")]
+    [SerializeField, Min(MinimumInterval)] private float approachRepathInterval = 0.2f;
+    
     private EnemyController _owner;
     private EnemyCombatMoveIntent _movementIntent;
     private NavMeshAgent _agent;
+    private NavMeshPath _approachPath;
     private bool _running;
     private bool _moving;
     private int _side;
     
+    private float _remainingApproachRepath;
     private float _remainingPause;
     private float _remainingMoveTime;
 
@@ -49,10 +55,12 @@ public class EnemyStrafeMovement : MonoBehaviour
     private float _remainingRetreatRepath;
     private bool _previousAutoBraking;
     private bool CanNavigate => _agent != null && _agent.isActiveAndEnabled && _agent.isOnNavMesh;
+    public bool ApproachDestinationReached{ get; private set;}
     private void Awake()
     {
         _owner = GetComponent<EnemyController>();
         _agent = GetComponent<NavMeshAgent>();
+        _approachPath = new NavMeshPath();
     }
     public void Begin()
     {
@@ -63,6 +71,9 @@ public class EnemyStrafeMovement : MonoBehaviour
         _previousUpdateRotation = _agent.updateRotation;
         _previousAutoBraking = _agent.autoBraking;
         _remainingRetreatRepath = 0f;
+        _remainingApproachRepath = 0f;
+        ApproachDestinationReached = false;
+
         _owner.StopMoving();
         _agent.speed = Mathf.Max(MinimumInterval, moveSpeed);
         _agent.acceleration = Mathf.Max(MinimumInterval, moveAcceleration);
@@ -75,7 +86,23 @@ public class EnemyStrafeMovement : MonoBehaviour
         _movementIntent = EnemyCombatMoveIntent.Strafe;
         _running = true;
     }
-    
+    public void End()
+    {
+        if(!_running) return;
+        if(_owner != null) _owner.StopMoving();
+        if(_agent != null)
+        {
+            _agent.speed = _previousSpeed;
+            _agent.stoppingDistance = _previousStoppingDistance;
+            _agent.updateRotation = _previousUpdateRotation;
+            _agent.acceleration = _previousAcceleration;
+            _agent.autoBraking = _previousAutoBraking;
+        }
+        _moving = false;
+        _running = false;
+        _remainingApproachRepath = 0f;
+        ApproachDestinationReached = false;
+    }
     public void Tick(float deltaTime, EnemyCombatMoveIntent intent)
     {
 
@@ -86,11 +113,27 @@ public class EnemyStrafeMovement : MonoBehaviour
             _movementIntent = intent;
             //이전 이동 목적지 취소 새 행동 전환
             _owner.StopMoving();
+
             _moving = false;
             _remainingPause = 0f;
             _remainingRetreatRepath = 0f;
+            _remainingApproachRepath = 0f;
+            ApproachDestinationReached = false;
 
-            _agent.autoBraking = intent == EnemyCombatMoveIntent.Retreat ? false : _previousAutoBraking;
+            switch (intent)
+            {
+                case EnemyCombatMoveIntent.Retreat:
+                    _agent.autoBraking = false;
+                    break;
+                
+                case EnemyCombatMoveIntent.Approach:
+                    _agent.autoBraking = true;
+                    break;
+                
+                default:
+                    _agent.autoBraking = _previousAutoBraking;
+                    break;
+            }
         }
 
         if(_movementIntent == EnemyCombatMoveIntent.Retreat)
@@ -98,7 +141,11 @@ public class EnemyStrafeMovement : MonoBehaviour
             TickRetreat(deltaTime);
             return;
         }
-        
+        if(_movementIntent == EnemyCombatMoveIntent.Approach)
+        {
+            TickApproach(deltaTime);
+            return;
+        }
         if(_moving)
         {
             _remainingMoveTime -= deltaTime;
@@ -235,21 +282,6 @@ public class EnemyStrafeMovement : MonoBehaviour
 
         _remainingRetreatRepath = Mathf.Max(MinimumInterval, blockedRetryDelay);
     }
-    public void End()
-    {
-        if(!_running) return;
-        if(_owner != null) _owner.StopMoving();
-        if(_agent != null)
-        {
-            _agent.speed = _previousSpeed;
-            _agent.stoppingDistance = _previousStoppingDistance;
-            _agent.updateRotation = _previousUpdateRotation;
-            _agent.acceleration = _previousAcceleration;
-            _agent.autoBraking = _previousAutoBraking;
-        }
-        _moving = false;
-        _running = false;
-    }
     private float GetPauseDuration()
     {
         float minimum = Mathf.Max(MinimumPauseDuration, minPauseDuration);
@@ -257,7 +289,130 @@ public class EnemyStrafeMovement : MonoBehaviour
 
         return Random.Range(minimum, maximum);
     }
+    
+    private void TickApproach(float deltaTime)
+    {
+        EnemyCombatDecision decision = _owner.CombatDecision;
 
+        if(!_owner.HasTarget || !_owner.CanSeePlayer || decision == null || !decision.isActiveAndEnabled)
+        {
+            StopApproachForRetry();
+            return;
+        }
+
+        if(ApproachDestinationReached)
+            return;
+        
+        _remainingApproachRepath -= deltaTime;
+
+        if (_moving)
+        {
+            _remainingMoveTime -= deltaTime;
+            if (_agent.pathPending)
+            {
+                if(_remainingMoveTime <= 0f)
+                    StopApproachForRetry();
+                
+                return;
+            }
+
+            if(!_agent.hasPath || _agent.pathStatus != NavMeshPathStatus.PathComplete)
+            {
+                StopApproachForRetry();
+                return;
+            }
+
+            if(_agent.remainingDistance <= _agent.stoppingDistance)
+            {
+                _owner.StopMoving();
+                _moving = false;
+                ApproachDestinationReached = true;
+                return;
+            }
+        }
+        if(_remainingApproachRepath > 0f)
+            return;
+        
+        _remainingApproachRepath = Mathf.Max(MinimumInterval, approachRepathInterval);
+
+        if(!TryStartApproach(decision.ApproachStopDistance))
+            StopApproachForRetry();
+
+    }
+
+    private bool TryStartApproach(float desireDistance)
+    {
+        Vector3 origin = _agent.nextPosition - Vector3.up * _agent.baseOffset;
+        Vector3 targetPosition = _owner.LastKnownPlayerPosition;
+        Vector3 toTarget = targetPosition - origin;
+        toTarget.y = 0f;
+        if(toTarget.sqrMagnitude <= DirectionSqrEpsion)
+            return false;
+        float currentDistance = toTarget.magnitude;
+        if(currentDistance <= desireDistance)
+            return false;
+        Vector3 direction = toTarget / currentDistance;
+
+        // 플레이어 위치까지 가지 않고 교전 거리를 남긴 지점으로 이동
+        Vector3 candidate = origin + direction * (currentDistance - desireDistance);
+        NavMeshQueryFilter filter = new NavMeshQueryFilter
+        {
+            agentTypeID = _agent.agentTypeID,
+            areaMask = _agent.areaMask
+        };
+
+        if(!NavMesh.SamplePosition(candidate, out NavMeshHit hit, sampleRadius, filter))
+            return false;
+        
+        if(Mathf.Abs(hit.position.y - origin.y) > maxHeightDifference)
+            return false;
+        
+        Vector3 candidateOffset = hit.position - targetPosition;
+        candidateOffset.y = 0f;
+
+         //실제로 가까워지는 목적지인지 확인
+         if(candidateOffset.sqrMagnitude >= toTarget.sqrMagnitude)
+            return false;
+
+        float minimumTravel = _agent.stoppingDistance * MinimumTravelMultiplier;
+
+        if((hit.position - origin).sqrMagnitude <= minimumTravel * minimumTravel)
+            return false;
+        
+        if(_approachPath == null)
+            return false;
+
+        // 모든 경로 포함해서 계산
+        if(!_agent.CalculatePath(hit.position, _approachPath))   
+            return false;
+        
+        if(_approachPath.status != NavMeshPathStatus.PathComplete)
+            return false;
+       
+        if(!_agent.SetPath(_approachPath))
+            return false;
+        
+        if(!_agent.SetDestination(hit.position))
+            return false;
+        
+        _agent.isStopped = false;
+        _moving = true;
+        _remainingMoveTime = Mathf.Max(MinimumInterval, moveTimeout);
+
+        return true;
+    }
+
+    private void StopApproachForRetry()
+    {
+        if(_moving)
+            _owner.StopMoving();
+        
+        _moving = false;
+        ApproachDestinationReached = false;
+        
+        _remainingApproachRepath = Mathf.Max(MinimumInterval, blockedRetryDelay);
+
+    }
     private void OnDisable()
     {
         End();

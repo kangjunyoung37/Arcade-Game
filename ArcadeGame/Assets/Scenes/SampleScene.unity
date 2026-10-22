@@ -16149,6 +16149,7 @@ MonoBehaviour:
   retreatRepathInterval: 0.2
   sampleRadius: 0.4
   maxHeightDifference: 0.5
+  approachRepathInterval: 0.2
 --- !u!114 &2039950124
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -16163,6 +16164,8 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   retreatEnterDistance: 4
   retreatExitDistance: 6
+  approachEnterDistance: 7.5
+  approachStopDistance: 6.5
 --- !u!114 &2039950125
 MonoBehaviour:
   m_ObjectHideFlags: 0
