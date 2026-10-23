@@ -4,7 +4,8 @@ public enum EnemyCombatMoveIntent
 {
     Strafe,
     Retreat,
-    Approach
+    Approach,
+    Hold
 }
 [DisallowMultipleComponent]
 [RequireComponent(typeof(EnemyController))]
@@ -12,15 +13,38 @@ public sealed class EnemyCombatDecision : MonoBehaviour
 {
     private const float MinimumDistance = 0.1f;
     private const float MinimumDistanceGap = 0.5f;
+    private const float MinimumDuration = 0.1f;
+    private const float MinimumRepeatMultiplier = 0.1f;
+
     [Header("Retreat")]
     [SerializeField, Min(MinimumDistance)] private float retreatEnterDistance = 4f;
     [SerializeField, Min(MinimumDistance)] private float retreatExitDistance = 6f;
+    
     [Header("Approach")]
     [SerializeField, Min(MinimumDistance)] private float approachEnterDistance = 7.5f;
     [SerializeField, Min(MinimumDistance)] private float approachStopDistance = 6.5f;
-    private EnemyController _owner;
-    public EnemyCombatMoveIntent Intent {get; private set;}
 
+    [Header("Pattern Duration")]
+    [SerializeField, Min(MinimumDuration)] private float  minPatternDuration = 1.2f;
+    [SerializeField, Min(MinimumDuration)] private float maxPatternDuration = 2.5f;
+
+    [Header("Pattern Weights")]
+    [SerializeField, Min(0f)] private float strafeWeight = 5f;
+    [SerializeField, Min(0f)] private float approachWeight = 4f;
+    [SerializeField, Min(0f)] private float holdWeight = 1f;
+    [Tooltip("직전 행동의 가충치에 곲하는 값")]
+    [SerializeField, Range(MinimumRepeatMultiplier , 1f)] private float repeatWeightMultiplier = 0.35f;
+
+    [Header("Movement Failure")]
+    [SerializeField, Min(MinimumDuration)] private float blockedPatternCooldown = 2f;
+
+    private EnemyController _owner;
+    private float _remainingPatternTime;
+    private float _strafeBlockedUntil;
+    private float _approachBlockedUntil;
+    private bool _hasSelection;
+    public EnemyCombatMoveIntent Intent {get; private set;}
+    private float RemainingPatternTime => _remainingPatternTime;
     private float RetreatEnterDistance => Mathf.Max(MinimumDistance, retreatEnterDistance);
     private float RetreatExitDistance => Mathf.Max(RetreatEnterDistance + MinimumDistanceGap, retreatExitDistance);
     public float ApproachStopDistance => Mathf.Max(RetreatExitDistance + MinimumDistanceGap, approachStopDistance);
@@ -32,16 +56,27 @@ public sealed class EnemyCombatDecision : MonoBehaviour
     }
     public void ResetDecision()
     {
-        Intent = EnemyCombatMoveIntent.Strafe;
+        Intent = EnemyCombatMoveIntent.Hold;
+        _remainingPatternTime = 0f;
+        _hasSelection = false;
     }
 
-    public EnemyCombatMoveIntent Evaluate()
+    public EnemyCombatMoveIntent Evaluate(float deltaTime)
     {
         if(_owner == null || !_owner.HasTarget || !_owner.CanSeePlayer)
         {
             ResetDecision();
             return Intent;
         }
+        if(deltaTime <= 0f)
+            return Intent;
+        EnemyStrafeMovement movement = _owner.StrafeMovement;
+        if(movement == null || !movement.CanExecuteCombatMovement)
+        {
+            ResetDecision();
+            return Intent;
+        }
+
         Vector3 difference = _owner.LastKnownPlayerPosition - transform.position;
         difference.y = 0f;
         float distanceSquared = difference.sqrMagnitude;
@@ -49,30 +84,111 @@ public sealed class EnemyCombatDecision : MonoBehaviour
         {
             float exitDistance = RetreatExitDistance;
             if(distanceSquared >= exitDistance * exitDistance)
-                Intent = EnemyCombatMoveIntent.Strafe;
-            return Intent;
+                return Intent;
+            _remainingPatternTime = 0f;
         }
+
         float retreatDistance = RetreatEnterDistance;
 
         if(distanceSquared <= retreatDistance  * retreatDistance )
         {
             Intent = EnemyCombatMoveIntent.Retreat;
+            _remainingPatternTime = 0f;
             return Intent;
         }
-        if(Intent == EnemyCombatMoveIntent.Approach)
-        {
-            float stopDistance = ApproachStopDistance;
+        float now = Time.time;
 
-            bool reachedDistance = distanceSquared <= stopDistance * stopDistance;
+        bool strafeAllowed = now >= _strafeBlockedUntil;
+        bool approachAllowed = now >= _approachBlockedUntil;
 
-            bool reachedDestination = _owner.StrafeMovement != null && _owner.StrafeMovement.ApproachDestinationReached;
-            if(reachedDistance || reachedDestination)
-                Intent = EnemyCombatMoveIntent.Strafe;
+        float stopDistance = ApproachStopDistance;
+        
+        bool approachFinished = Intent == EnemyCombatMoveIntent.Approach && (distanceSquared <= stopDistance * stopDistance || movement.ApproachDestinationReached);
+
+        bool currentInvalid = Intent == EnemyCombatMoveIntent.Retreat || (Intent == EnemyCombatMoveIntent.Strafe && !strafeAllowed) || (Intent == EnemyCombatMoveIntent.Approach && (!approachAllowed || approachFinished));
+
+        _remainingPatternTime = Mathf.Max(0f, _remainingPatternTime - deltaTime);
+
+        if(!currentInvalid && _remainingPatternTime > 0f)
             return Intent;
-        }
+        
         float enterDistance = ApproachEnterDistance;
-        if(distanceSquared >= enterDistance * enterDistance)
-            Intent = EnemyCombatMoveIntent.Approach;
+        
+        bool canStartApproach = approachAllowed && !approachFinished && distanceSquared >= enterDistance * enterDistance;
+
+        SelectPattern(strafeAllowed, canStartApproach);
         return Intent;
+    }
+    private void SelectPattern(bool strafeAllowed, bool approachAllowed)
+    {
+        float strafe = strafeAllowed ? Mathf.Max(0f, strafeWeight) : 0f;
+        float approach = approachAllowed ? Mathf.Max(0f, approachWeight) : 0f;
+
+        float hold = Mathf.Max(0f, holdWeight);
+        if (_hasSelection)
+        {
+            float multiplier = Mathf.Clamp(repeatWeightMultiplier, MinimumRepeatMultiplier, 1f);
+            switch(Intent)
+            {
+                case EnemyCombatMoveIntent.Strafe:
+                    strafe *= multiplier;
+                    break;
+                case EnemyCombatMoveIntent.Approach:
+                    approach *= multiplier;
+                    break;
+                case EnemyCombatMoveIntent.Hold:
+                    hold *= multiplier;
+                    break;
+            }
+        }
+
+        Intent = PickWeighted(strafe, approach, hold);
+        _hasSelection = true;
+
+        float minimum = Mathf.Max(MinimumDuration, minPatternDuration);
+        float maximum = Mathf.Max(minimum, maxPatternDuration);
+        
+        _remainingPatternTime = Random.Range(minimum, maximum);
+    }
+    private static EnemyCombatMoveIntent PickWeighted(float strafe, float approach, float hold)
+    {
+        float total = strafe + approach + hold;
+
+        if(total <= 0f)
+            return EnemyCombatMoveIntent.Hold;
+
+        float value = Random.Range(0f, total);
+
+        if(value < strafe)
+            return EnemyCombatMoveIntent.Strafe;
+        
+        value -= strafe;
+
+        if(value < approach)
+            return EnemyCombatMoveIntent.Approach;
+        
+        if(hold > 0f)
+            return EnemyCombatMoveIntent.Hold;
+        
+        //난수가 최댓값인 경우에도 가중치 0인 행동은 선택 x
+        return approach > 0f ? EnemyCombatMoveIntent.Approach : EnemyCombatMoveIntent.Strafe;
+    }
+    
+    public void ReportMovmentBlocked(EnemyCombatMoveIntent intent)
+    {
+        float until = Time.time + Mathf.Max(MinimumDuration, blockedPatternCooldown);
+        switch (intent)
+        {
+            case EnemyCombatMoveIntent.Strafe:
+                _strafeBlockedUntil = until;
+                break;
+            case EnemyCombatMoveIntent.Approach:
+                _approachBlockedUntil = until;
+                break;
+            default:
+                return;
+        }
+        if(Intent == intent)
+            _remainingPatternTime = 0f;
     }
 }

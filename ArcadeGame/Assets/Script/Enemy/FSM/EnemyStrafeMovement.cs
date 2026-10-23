@@ -55,6 +55,7 @@ public class EnemyStrafeMovement : MonoBehaviour
     private float _remainingRetreatRepath;
     private bool _previousAutoBraking;
     private bool CanNavigate => _agent != null && _agent.isActiveAndEnabled && _agent.isOnNavMesh;
+    public bool CanExecuteCombatMovement => _running && isActiveAndEnabled && CanNavigate;
     public bool ApproachDestinationReached{ get; private set;}
     private void Awake()
     {
@@ -136,6 +137,9 @@ public class EnemyStrafeMovement : MonoBehaviour
             }
         }
 
+        if(_movementIntent == EnemyCombatMoveIntent.Hold)
+            return;
+
         if(_movementIntent == EnemyCombatMoveIntent.Retreat)
         {
             TickRetreat(deltaTime);
@@ -149,12 +153,18 @@ public class EnemyStrafeMovement : MonoBehaviour
         if(_moving)
         {
             _remainingMoveTime -= deltaTime;
-            bool finished = !_agent.pathPending && (!_agent.hasPath || _agent.pathStatus != NavMeshPathStatus.PathComplete || _agent.remainingDistance <= _agent.stoppingDistance);
-            if(finished || _remainingMoveTime <= 0f)
+            bool pathFailed = !_agent.pathPending && (!_agent.hasPath || _agent.pathStatus != NavMeshPathStatus.PathComplete);
+            bool arrived = !_agent.pathPending && !pathFailed && _agent.remainingDistance <= _agent.stoppingDistance;;
+            bool timeOut = _remainingMoveTime <= 0f;
+
+            if(arrived || pathFailed || timeOut)
             {
                 _owner.StopMoving();
                 _moving = false;
                 _remainingPause = GetPauseDuration();
+
+                if(!arrived && (pathFailed || timeOut))
+                    ReportBlocked(EnemyCombatMoveIntent.Strafe);
             }
             return;
         }
@@ -171,6 +181,7 @@ public class EnemyStrafeMovement : MonoBehaviour
             return;
         }
         _remainingPause = Mathf.Max(MinimumInterval, blockedRetryDelay);
+        ReportBlocked(EnemyCombatMoveIntent.Strafe);
     }
     private bool TryStartMove(int side)
     {
@@ -392,9 +403,6 @@ public class EnemyStrafeMovement : MonoBehaviour
         if(!_agent.SetPath(_approachPath))
             return false;
         
-        if(!_agent.SetDestination(hit.position))
-            return false;
-        
         _agent.isStopped = false;
         _moving = true;
         _remainingMoveTime = Mathf.Max(MinimumInterval, moveTimeout);
@@ -411,7 +419,19 @@ public class EnemyStrafeMovement : MonoBehaviour
         ApproachDestinationReached = false;
         
         _remainingApproachRepath = Mathf.Max(MinimumInterval, blockedRetryDelay);
+        if(_owner != null && _owner.HasTarget && _owner.CanSeePlayer)
+            ReportBlocked(EnemyCombatMoveIntent.Approach);
 
+    }
+
+    private void ReportBlocked(EnemyCombatMoveIntent intent)
+    {
+        if(_owner == null)
+            return;
+        EnemyCombatDecision decision = _owner.CombatDecision;
+
+        if(decision != null && decision.isActiveAndEnabled)
+            decision.ReportMovmentBlocked(intent);
     }
     private void OnDisable()
     {

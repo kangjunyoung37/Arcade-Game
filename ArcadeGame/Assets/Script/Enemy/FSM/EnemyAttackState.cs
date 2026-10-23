@@ -38,9 +38,9 @@ public sealed class EnemyAttackState : IState
             _owner.ChangeState(_owner.ChaseState);
             return;
         }
-        EnemyCombatMoveIntent intent = EnemyCombatMoveIntent.Strafe;
+        EnemyCombatMoveIntent intent = EnemyCombatMoveIntent.Hold;
         if(_owner.CombatDecision != null && _owner.CombatDecision.isActiveAndEnabled)
-            intent = _owner.CombatDecision.Evaluate();
+            intent = _owner.CombatDecision.Evaluate(deltaTime);
         if(_owner.StrafeMovement != null) 
             _owner.StrafeMovement.Tick(deltaTime, intent);
 
