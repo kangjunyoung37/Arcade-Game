@@ -16166,6 +16166,13 @@ MonoBehaviour:
   retreatExitDistance: 6
   approachEnterDistance: 7.5
   approachStopDistance: 6.5
+  minPatternDuration: 1.2
+  maxPatternDuration: 2.5
+  strafeWeight: 5
+  approachWeight: 4
+  holdWeight: 1
+  repeatWeightMultiplier: 0.35
+  blockedPatternCooldown: 2
 --- !u!114 &2039950125
 MonoBehaviour:
   m_ObjectHideFlags: 0
