@@ -179,6 +179,7 @@ public sealed class EnemyController : MonoBehaviour
     public float CoverFastMoveExitDistance => Mathf.Max(MinimumFastMoveDistanceGap, coverFastMoveExitDistance);
     public float CoverFastMoveEnterDistance => Mathf.Max(CoverFastMoveExitDistance + MinimumFastMoveDistanceGap, coverFastMoveEnterDistance);
     
+    public EnemyCombatPressure CombatPressure { get; private set; }
     public EnemyStrafeMovement StrafeMovement {get; private set;}
     public IState AttackState { get; private set; }
     public bool CanSeePlayer { get; private set; }
@@ -279,6 +280,8 @@ public sealed class EnemyController : MonoBehaviour
 
         CoverState = new EnemyCoverState(this, _agent, CoverSensor);
         if(healthSystem == null) TryGetComponent(out healthSystem);
+        TryGetComponent(out EnemyCombatPressure combatPressure);
+        CombatPressure = combatPressure;
     }
 
     private void Start()
@@ -293,6 +296,9 @@ public sealed class EnemyController : MonoBehaviour
     private void Update()
     {
         float deltaTime = Time.deltaTime;
+
+        if (CombatPressure != null)
+            CombatPressure.TickPressure();
 
         UpdatePerception(deltaTime);
         UpdateCoverDecision();
@@ -805,11 +811,17 @@ public sealed class EnemyController : MonoBehaviour
 
     private void HandleDamageReceived(DamageInfo damageInfo)
     {
-        if(!CanReactToHit || _stateMachine == null || CoverState == null)
+        if(!CanReactToHit)
             return;
+        if(CombatPressure != null)
+            CombatPressure.RegisterHit();
         
+        if( _stateMachine == null || CoverState == null )
+            return;
+
         if(!ReferenceEquals(_stateMachine.CurrentState, CoverState))
             return;
+
         CoverState.QueueHitReaction();
     }
 #if UNITY_EDITOR
@@ -852,6 +864,32 @@ public sealed class EnemyController : MonoBehaviour
 
         bool accepted = CoverState.QueueHitReaction();
         Debug.Log(accepted ? "피격 반응 예약 완료. 다음 Tick에서 엄폐 복귀를 시도합니다." : "현재는 피킹 이동 또는 피킹 사격 단계가 아닙니다.", this);
+    }
+
+    private const string SimulateCombatHitMenu =
+    "Test/Simulate Combat Hit";
+
+    [ContextMenu(SimulateCombatHitMenu)]
+    private void TestSimulateCombatHit()
+    {
+        if (!Application.isPlaying ||
+            !CanReactToHit ||
+            CombatPressure == null ||
+            !CombatPressure.isActiveAndEnabled)
+        {
+            Debug.LogWarning(
+                "Play 모드에서 HealthSystem과 EnemyCombatPressure 연결을 확인하세요.",
+                this);
+            return;
+        }
+
+        // 실제 체력을 감소시키지 않고 AI의 피격 수신 경로만 테스트.
+        HandleDamageReceived(default);
+
+        Debug.Log(
+            $"Pressure: {CombatPressure.PressureNormalized:F2}, " +
+            $"High Pressure: {CombatPressure.IsHighPressure}",
+            this);
     }
 #endif
 

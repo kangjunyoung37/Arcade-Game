@@ -38,6 +38,10 @@ public sealed class EnemyCombatDecision : MonoBehaviour
     [Header("Movement Failure")]
     [SerializeField, Min(MinimumDuration)] private float blockedPatternCooldown = 2f;
 
+    [Header("Pressure Response")]
+    [SerializeField, Min(1f)] private float pressureStrafeMultiplier = 2f;
+    [SerializeField, Range(0f, 1f)] private float pressureHoldMultiplier = 0.25f;
+
     private EnemyController _owner;
     private float _remainingPatternTime;
     private float _strafeBlockedUntil;
@@ -49,6 +53,22 @@ public sealed class EnemyCombatDecision : MonoBehaviour
     private float RetreatExitDistance => Mathf.Max(RetreatEnterDistance + MinimumDistanceGap, retreatExitDistance);
     public float ApproachStopDistance => Mathf.Max(RetreatExitDistance + MinimumDistanceGap, approachStopDistance);
     public float ApproachEnterDistance => Mathf.Max(ApproachStopDistance + MinimumDistanceGap, approachEnterDistance);
+    private float CurrentPressure
+    {
+        get
+        { 
+            EnemyCombatPressure pressure = _owner != null ? _owner.CombatPressure : null;
+            return pressure != null && pressure.isActiveAndEnabled ? pressure.PressureNormalized : 0f;
+        }
+    }
+    private bool IsUnderHighPressure
+    {
+        get
+        {
+            EnemyCombatPressure pressure = _owner != null ? _owner.CombatPressure : null;
+            return pressure != null && pressure.isActiveAndEnabled && pressure.IsHighPressure;
+        }
+    }
 
     private void Awake()
     {
@@ -99,7 +119,7 @@ public sealed class EnemyCombatDecision : MonoBehaviour
         float now = Time.time;
 
         bool strafeAllowed = now >= _strafeBlockedUntil;
-        bool approachAllowed = now >= _approachBlockedUntil;
+        bool approachAllowed = now >= _approachBlockedUntil && !IsUnderHighPressure;
 
         float stopDistance = ApproachStopDistance;
         
@@ -125,6 +145,13 @@ public sealed class EnemyCombatDecision : MonoBehaviour
         float approach = approachAllowed ? Mathf.Max(0f, approachWeight) : 0f;
 
         float hold = Mathf.Max(0f, holdWeight);
+        float pressure = CurrentPressure;
+
+        approach *= 1f - pressure;
+
+        strafe *= Mathf.Lerp(1f, Mathf.Max(1f, pressureStrafeMultiplier),pressure);
+        
+        hold *= Mathf.Lerp(1f, Mathf.Clamp01(pressureHoldMultiplier), pressure);
         if (_hasSelection)
         {
             float multiplier = Mathf.Clamp(repeatWeightMultiplier, MinimumRepeatMultiplier, 1f);
