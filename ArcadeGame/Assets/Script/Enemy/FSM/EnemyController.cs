@@ -114,6 +114,13 @@ public sealed class EnemyController : MonoBehaviour
     [SerializeField, Min(MinimumCoverMoveSpeed)] private float coverFastMoveSpeed = 8f;
     [SerializeField, Min(MinimumFastMoveDistanceGap)] private float coverFastMoveEnterDistance = 5f;
     [SerializeField, Min(MinimumFastMoveDistanceGap)] private float coverFastMoveExitDistance = 2f;
+    
+    [Header("Hit Reaction")]
+    [SerializeField] private HealthSystem healthSystem;
+    [SerializeField, Min(0.1f)] private float hitPeekRecoveryDuration = 2f;
+    public float HitPeekRecoveryDuration => Mathf.Max(0.1f, hitPeekRecoveryDuration);
+
+    public bool CanReactToHit => isActiveAndEnabled && healthSystem != null && healthSystem.isActiveAndEnabled && healthSystem.IsAlive;
 
     private float _timeWithoutSight;
     private float _viewDotThreshold;
@@ -271,7 +278,7 @@ public sealed class EnemyController : MonoBehaviour
         CoverSensor = coverSensor;
 
         CoverState = new EnemyCoverState(this, _agent, CoverSensor);
-
+        if(healthSystem == null) TryGetComponent(out healthSystem);
     }
 
     private void Start()
@@ -300,6 +307,9 @@ public sealed class EnemyController : MonoBehaviour
     }
     private void OnEnable()
     {
+        if(healthSystem != null)
+            healthSystem.DamageReceived += HandleDamageReceived;
+
         PlayerNoise.Emitted += HandlePlayerNoise;
         _remainingPerceptionTime = 0f;
         _timeWithoutSight = 0f;
@@ -313,6 +323,9 @@ public sealed class EnemyController : MonoBehaviour
 
     private void OnDisable()
     {
+        if(healthSystem != null)
+            healthSystem.DamageReceived -= HandleDamageReceived;
+            
         PlayerNoise.Emitted -= HandlePlayerNoise;
         PauseAttackCycle();
         _stateMachine?.Stop();
@@ -789,6 +802,16 @@ public sealed class EnemyController : MonoBehaviour
         float maximum = baseDuration + jitter;
         return UnityEngine.Random.Range(minimum, maximum);
     }
+
+    private void HandleDamageReceived(DamageInfo damageInfo)
+    {
+        if(!CanReactToHit || _stateMachine == null || CoverState == null)
+            return;
+        
+        if(!ReferenceEquals(_stateMachine.CurrentState, CoverState))
+            return;
+        CoverState.QueueHitReaction();
+    }
 #if UNITY_EDITOR
     private void OnValidate()
     {
@@ -814,6 +837,21 @@ public sealed class EnemyController : MonoBehaviour
                 ? "엄폐 상태 진입: 후보 예약 완료"
                 : "엄폐 진입 실패: 전투 상태, 시야, 후보 조건을 확인하세요.",
             this);
+    }
+
+    private const string SimulatePeekHitMenu = "Test/Simulate Peek Hit";
+
+    [ContextMenu(SimulatePeekHitMenu)]
+    private void TestSimulatePeekHit()
+    {
+        if(!Application.isPlaying || !CanReactToHit || _stateMachine == null || CoverState == null || !ReferenceEquals(_stateMachine.CurrentState, CoverState))
+        {
+            Debug.LogWarning("Play 모드에서 살아 있는 적이 엄폐 상태일 때 실행하세요.", this);
+            return;
+        }
+
+        bool accepted = CoverState.QueueHitReaction();
+        Debug.Log(accepted ? "피격 반응 예약 완료. 다음 Tick에서 엄폐 복귀를 시도합니다." : "현재는 피킹 이동 또는 피킹 사격 단계가 아닙니다.", this);
     }
 #endif
 

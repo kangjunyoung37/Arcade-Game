@@ -16082,6 +16082,8 @@ MonoBehaviour:
   coverFastMoveSpeed: 6.5
   coverFastMoveEnterDistance: 5
   coverFastMoveExitDistance: 2
+  healthSystem: {fileID: 2039950113}
+  hitPeekRecoveryDuration: 2
 --- !u!195 &2039950121
 NavMeshAgent:
   m_ObjectHideFlags: 0

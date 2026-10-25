@@ -83,7 +83,7 @@ public sealed class EnemyCombatDecision : MonoBehaviour
         if(Intent == EnemyCombatMoveIntent.Retreat)
         {
             float exitDistance = RetreatExitDistance;
-            if(distanceSquared >= exitDistance * exitDistance)
+            if(distanceSquared < exitDistance * exitDistance)
                 return Intent;
             _remainingPatternTime = 0f;
         }

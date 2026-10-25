@@ -35,6 +35,7 @@ public sealed class EnemyCoverState : IState
     private float _previousStoppingDistance;
     private float _remainingReloadWait;
     private float _remainingPeekTime;
+    private float _nextPeekAllowedTime;
 
     private bool _previousAutoBraking;
     private bool _previousUpdateRotation;
@@ -44,6 +45,9 @@ public sealed class EnemyCoverState : IState
     private bool _settingsSaved;
     private bool _hasPreviousPeekSide;
     private bool _isFastCoverMove;
+    private bool _pendingHitReaction;
+    
+
     private int _shotsthisPeek;
     private int _peekCycles;
     private EnemyCoverSensor.PeekSide _previousPeekSide;
@@ -51,7 +55,9 @@ public sealed class EnemyCoverState : IState
     private Vector3 GroundPosition => _agent.nextPosition - Vector3.up * _agent.baseOffset;
 
     public bool IsHolding => _entered && _phase == Phase.Holding;
-    public bool IsFastCoverMove => _entered && _isFastCoverMove;   
+    public bool IsFastCoverMove => _entered && _isFastCoverMove;
+    public bool IsPeeking =>_entered && (_phase == Phase.MovingToPeek || _phase == Phase.Firing);
+
     public EnemyCoverState(EnemyController onwer, NavMeshAgent agent, EnemyCoverSensor sensor)
     {
         _owner = onwer != null ? onwer : throw new ArgumentNullException(nameof(onwer));
@@ -60,6 +66,14 @@ public sealed class EnemyCoverState : IState
         _sensor = sensor;
     }
 
+    public bool QueueHitReaction()
+    {
+        if(_failed || !IsPeeking)
+            return false;
+
+        _pendingHitReaction = true;
+        return true;
+    }
     public bool TryPrepare(bool reloadOnArrival = false)
     {
         if(_entered || _point != null || !CanNavigate || _sensor == null || !_sensor.isActiveAndEnabled || !_owner.HasTarget)
@@ -87,7 +101,8 @@ public sealed class EnemyCoverState : IState
         _hasPreviousPeekSide = false;
         _shotsthisPeek = 0;
         _remainingPeekTime = 0f;
-
+        _pendingHitReaction = false;
+        _nextPeekAllowedTime = 0f;
         _remainingMoveTime = _owner.CoverMoveTimeout;
         _remainingHoldTime = _owner.CoverHoldDuration;
         _remainingCheckTime = 0f;
@@ -147,6 +162,19 @@ public sealed class EnemyCoverState : IState
             if(!_sensor.IsCoverPositionSafe(positionToCheck, _owner.LastKnownPlayerPosition))
             {
                 ReturnToNormalBehaviour();
+                return;
+            }
+        }
+
+        if(_pendingHitReaction)
+        {
+             _pendingHitReaction = false;
+
+             if(_owner.CanReactToHit && IsPeeking)
+            {
+                _nextPeekAllowedTime = Time.time + _owner.HitPeekRecoveryDuration;
+
+                BeginReturnToCover();
                 return;
             }
         }
@@ -311,6 +339,9 @@ public sealed class EnemyCoverState : IState
             _remainingReloadWait = _owner.CoverReloadWaitLimit;
             return;
         }
+        if (Time.time < _nextPeekAllowedTime)
+            return;
+            
         EnemyCoverSensor.PeekSide preferredSide = SelectPreferredPeekSide();
 
         if(!_sensor.TryFindPeekPosition(_point, _owner.LastKnownPlayerPosition, _owner.LastKnownAimPosition, out EnemyCoverSensor.PeekSide selectedSide, out Vector3 peekPosition, preferredSide))
@@ -404,6 +435,8 @@ public sealed class EnemyCoverState : IState
         _reloadOnArrival = false;
         _remainingReloadWait = 0f;
         _isFastCoverMove = false;
+        _pendingHitReaction = false;
+        _nextPeekAllowedTime = 0f;
     }
 
     private void ReturnToNormalBehaviour()
