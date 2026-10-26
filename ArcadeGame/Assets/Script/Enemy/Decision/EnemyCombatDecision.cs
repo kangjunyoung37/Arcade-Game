@@ -100,22 +100,14 @@ public sealed class EnemyCombatDecision : MonoBehaviour
         Vector3 difference = _owner.LastKnownPlayerPosition - transform.position;
         difference.y = 0f;
         float distanceSquared = difference.sqrMagnitude;
-        if(Intent == EnemyCombatMoveIntent.Retreat)
-        {
-            float exitDistance = RetreatExitDistance;
-            if(distanceSquared < exitDistance * exitDistance)
-                return Intent;
-            _remainingPatternTime = 0f;
-        }
 
-        float retreatDistance = RetreatEnterDistance;
-
-        if(distanceSquared <= retreatDistance  * retreatDistance )
+        if(ShouldPrioritizeRetreat())
         {
             Intent = EnemyCombatMoveIntent.Retreat;
             _remainingPatternTime = 0f;
             return Intent;
         }
+        
         float now = Time.time;
 
         bool strafeAllowed = now >= _strafeBlockedUntil;
@@ -217,5 +209,26 @@ public sealed class EnemyCombatDecision : MonoBehaviour
         }
         if(Intent == intent)
             _remainingPatternTime = 0f;
+    }
+
+    public bool ShouldPrioritizeRetreat()
+    {
+        if(!isActiveAndEnabled || _owner == null || !_owner.HasTarget || !_owner.CanSeePlayer)
+            return false;
+        
+        Vector3 difference = _owner.LastKnownPlayerPosition - transform.position;
+        difference.y = 0f;
+
+        float distanceSquared = difference.sqrMagnitude;
+
+        if(Intent == EnemyCombatMoveIntent.Retreat)
+        {
+            float exitDistance = RetreatExitDistance;
+
+            return distanceSquared < exitDistance * exitDistance;
+        }
+        float enterDistance = RetreatEnterDistance;
+
+        return distanceSquared <= enterDistance * enterDistance;
     }
 }

@@ -15882,6 +15882,7 @@ GameObject:
   - component: {fileID: 2039950123}
   - component: {fileID: 2039950124}
   - component: {fileID: 2039950125}
+  - component: {fileID: 2039950126}
   m_Layer: 9
   m_Name: DommyEnemy
   m_TagString: Untagged
@@ -16084,6 +16085,7 @@ MonoBehaviour:
   coverFastMoveExitDistance: 2
   healthSystem: {fileID: 2039950113}
   hitPeekRecoveryDuration: 2
+  seekCoverWhenPressureHigh: 1
 --- !u!195 &2039950121
 NavMeshAgent:
   m_ObjectHideFlags: 0
@@ -16175,6 +16177,8 @@ MonoBehaviour:
   holdWeight: 1
   repeatWeightMultiplier: 0.35
   blockedPatternCooldown: 2
+  pressureStrafeMultiplier: 2
+  pressureHoldMultiplier: 0.25
 --- !u!114 &2039950125
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -16206,6 +16210,23 @@ MonoBehaviour:
   testFoundCover: 0
   testSelectedPoint: {fileID: 0}
   testDestination: {x: 0, y: 0, z: 0}
+--- !u!114 &2039950126
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2039950112}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 50e61cc046bee5a46b8905072ff8c39e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  pressurePerHit: 0.25
+  decayDelay: 2
+  decayPerSecond: 0.15
+  highPressureEnter: 0.65
+  highPressureExit: 0.35
 --- !u!1 &2056923189
 GameObject:
   m_ObjectHideFlags: 0

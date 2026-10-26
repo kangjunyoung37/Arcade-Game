@@ -88,9 +88,7 @@ public sealed class EnemyCombatPressure : MonoBehaviour
                 IsHighPressure = false;     
         }
 
-
         else if(_pressure >= EnterThreshold)
             IsHighPressure = true;
     }
-
 }

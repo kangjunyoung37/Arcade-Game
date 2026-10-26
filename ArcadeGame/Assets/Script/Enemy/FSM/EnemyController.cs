@@ -118,6 +118,7 @@ public sealed class EnemyController : MonoBehaviour
     [Header("Hit Reaction")]
     [SerializeField] private HealthSystem healthSystem;
     [SerializeField, Min(0.1f)] private float hitPeekRecoveryDuration = 2f;
+    [SerializeField] private bool seekCoverWhenPressureHigh = true;
     public float HitPeekRecoveryDuration => Mathf.Max(0.1f, hitPeekRecoveryDuration);
 
     public bool CanReactToHit => isActiveAndEnabled && healthSystem != null && healthSystem.isActiveAndEnabled && healthSystem.IsAlive;
@@ -146,39 +147,42 @@ public sealed class EnemyController : MonoBehaviour
     public float SearchTurnSpeed => searchTurnSpeed;
     public float SearchStoppingDistance => searchStoppingDistance;
     public float SearchChaseRetryDelay => searchChaseRetryDelay;
-
     public float ChasePathUpdateInterval => chasePathUpdateInterval;
     public float ChaseMemoryDuration => chaseMemoryDuration;
-
-    public float ChaseStoppingDistance => CanSeePlayer ? attackRange * AttackApproachRatio : investigationStoppingDistance;
-
-    public bool HasTarget => target != null && target.gameObject.activeInHierarchy;
-    
-    public bool CanNaviagate => _agent != null && _agent.isActiveAndEnabled && _agent.isOnNavMesh;
-    public bool IsPathPendinng => CanNaviagate && _agent.pathPending;
+    public float ChaseStoppingDistance => CanSeePlayer ? attackRange * AttackApproachRatio : investigationStoppingDistance;    
+    public float CoverReloadWaitLimit => HasUsableWeapon ? _weapon.EstimatedReloadWait + Mathf.Max(0.1f, coverReloadTimeoutMargin) : 0f;
+    public float PostReloadHoldDuration => Mathf.Max(0f, postReloadHoldDuration);
     public float CoverMoveSpeed => coverMoveSpeed;
     public float CoverAcceleration => coverAcceleration;
     public float CoverMoveTimeout => coverMoveTimeOut;
     public float CoverHoldDuration => coverHoldDuration;
     public float CoverCheckInterval => coverCheckInterval;
-    public bool HasUsableWeapon => _weapon != null && _weapon.IsReadyForAI;
-    public bool WeaponNeedsReload => HasUsableWeapon && _weapon.NeedsReload;
-    public bool WeaponIsReloading => HasUsableWeapon && _weapon.IsReloading;
-    public float CoverReloadWaitLimit => HasUsableWeapon ? _weapon.EstimatedReloadWait + Mathf.Max(0.1f, coverReloadTimeoutMargin) : 0f;
-    public float PostReloadHoldDuration => Mathf.Max(0f, postReloadHoldDuration);
-    public Vector3 LastKnownAimPosition => LastKnownPlayerPosition + Vector3.up * targetAimHeight;
     public float AttackHoldRange => Mathf.Max(0f, attackRange + attackRangeBuffer);
     public float PeekmoveTimeout => Mathf.Max(0.1f, peekMoveTimeout);
     public float PeekExposureDuration => Mathf.Max(0.1f, peekExposureDuration);
-    public int ShotsPerPeek => Mathf.Max(1, shotsPerPeek);
-    public int MaxPeekCycles => Mathf.Max(1, maxPeekCycles);
     public float PeekMemoryDuration => Mathf.Max(0.1f, peekMemoryDuration);
-    public bool HasLoadedAmmunition => HasUsableWeapon && _weapon.LoadedRounds > 0;
     public float PeekSideSwithChance => Mathf.Clamp01(peekSideSwithChance);
     public float CoverFastMoveSpeed => Mathf.Max(MinimumCoverMoveSpeed, Mathf.Max(coverMoveSpeed, coverFastMoveSpeed));
     public float CoverFastMoveExitDistance => Mathf.Max(MinimumFastMoveDistanceGap, coverFastMoveExitDistance);
     public float CoverFastMoveEnterDistance => Mathf.Max(CoverFastMoveExitDistance + MinimumFastMoveDistanceGap, coverFastMoveEnterDistance);
+    public float AlertReactionTime => alertReactionTime;
+    public float AlertMemoryDuration => alertMemoryDuration;
+
+    public bool HasTarget => target != null && target.gameObject.activeInHierarchy;
+    public bool HasUsableWeapon => _weapon != null && _weapon.IsReadyForAI;
+    public bool WeaponNeedsReload => HasUsableWeapon && _weapon.NeedsReload;
+    public bool WeaponIsReloading => HasUsableWeapon && _weapon.IsReloading;
+    public bool CanNaviagate => _agent != null && _agent.isActiveAndEnabled && _agent.isOnNavMesh;
+    public bool IsPathPendinng => CanNaviagate && _agent.pathPending;
+    public bool HasLoadedAmmunition => HasUsableWeapon && _weapon.LoadedRounds > 0;
+    private bool ShouldDeferCoverForRetreat => CombatDecision != null && CombatDecision.isActiveAndEnabled && CombatDecision.ShouldPrioritizeRetreat();
+    private bool ShouldSeekCoverForPressure => seekCoverWhenPressureHigh && CanReactToHit && CombatPressure != null && CombatPressure.isActiveAndEnabled && CombatPressure.IsHighPressure;
+
+    public Vector3 LastKnownAimPosition => LastKnownPlayerPosition + Vector3.up * targetAimHeight;
     
+    public int ShotsPerPeek => Mathf.Max(1, shotsPerPeek);
+    public int MaxPeekCycles => Mathf.Max(1, maxPeekCycles);
+
     public EnemyCombatPressure CombatPressure { get; private set; }
     public EnemyStrafeMovement StrafeMovement {get; private set;}
     public IState AttackState { get; private set; }
@@ -186,8 +190,7 @@ public sealed class EnemyController : MonoBehaviour
     public Vector3 LastKnownPlayerPosition { get; private set; }
     public float LastStimulusTime { get; private set; }
 
-    public float AlertReactionTime => alertReactionTime;
-    public float AlertMemoryDuration => alertMemoryDuration;
+
     public IState ChaseState { get; private set; }
     public IState SearchState { get; private set; }
 
@@ -662,24 +665,29 @@ public sealed class EnemyController : MonoBehaviour
 
     private void UpdateCoverDecision()
     {
-        if(!seekCoverWhenAmmoLow || !HasUsableWeapon || !WeaponNeedsReload || !HasTarget || !CanSeePlayer || CoverState == null || _stateMachine == null)
+        if(!isActiveAndEnabled || !HasUsableWeapon || !CanNaviagate || !HasTarget || !CanSeePlayer || CoverState == null || _stateMachine == null)
             return;
+
         IState current = _stateMachine.CurrentState;
 
         if(!ReferenceEquals(current, AttackState) && !ReferenceEquals(current, ChaseState))
             return;
-        if(Time.time < _nextCoverAttempTime)
+        
+        if(ShouldDeferCoverForRetreat || TryGetRecentCloseFootstep(out _))
             return;
-        int capacity = _weapon.LoadedCapacity;
+        
+        float now = Time.time;
 
-        if(capacity <= 0)
+        if(now < _nextCoverAttempTime)
             return;
-        float ammoRatio = _weapon.LoadedRounds / (float)capacity;
+        bool reloadRequested = ShouldSeekCoverForReload();
+        bool pressureRequested = ShouldSeekCoverForPressure;
 
-        if(ammoRatio > Mathf.Clamp01(lowAmmoRatio))
+        if(!reloadRequested && !pressureRequested)
             return;
-        _nextCoverAttempTime = Time.time + Mathf.Max(MinimumCoverDecisionInterval , coverRetryInterval);
-        TryEnterCover(reloadOnArrival: true);
+        _nextCoverAttempTime = now + Mathf.Max(MinimumCoverDecisionInterval, coverRetryInterval);
+
+        TryEnterCover(reloadOnArrival: reloadRequested);
 
     }
     public void FaceLastKnownPosition(float deletaTime)
@@ -757,15 +765,19 @@ public sealed class EnemyController : MonoBehaviour
 
     public bool TryEnterCover(bool reloadOnArrival = false)
     {
-        if(!isActiveAndEnabled || _stateMachine == null || _stateMachine.CurrentState == null || CoverState == null || ReferenceEquals(_stateMachine.CurrentState, CoverState) || !HasTarget || !CanSeePlayer)
+        if (!isActiveAndEnabled ||!CanNaviagate ||!HasUsableWeapon ||_stateMachine == null || _stateMachine.CurrentState == null ||CoverState == null ||ReferenceEquals(_stateMachine.CurrentState, CoverState) ||!HasTarget || !CanSeePlayer)
             return false;
-        if(TryGetRecentCloseFootstep(out _))
+    
+        if(ShouldDeferCoverForRetreat || TryGetRecentCloseFootstep(out _))
             return false;
+
         IState current = _stateMachine.CurrentState;
         if(!ReferenceEquals(current, AttackState) && !ReferenceEquals(current, ChaseState))
             return false;
+
         if(!CoverState.TryPrepare(reloadOnArrival))
             return false;
+
         ChangeState(CoverState);
         return true;
     }
@@ -823,6 +835,21 @@ public sealed class EnemyController : MonoBehaviour
             return;
 
         CoverState.QueueHitReaction();
+    }
+
+    private bool ShouldSeekCoverForReload()
+    {
+        if(!seekCoverWhenAmmoLow || !HasUsableWeapon || !WeaponNeedsReload)
+            return false;
+        
+        int capacity = _weapon.LoadedCapacity;
+
+        if(capacity <= 0)
+            return false;
+        
+        float ammoRatio = _weapon.LoadedRounds / (float)capacity;
+
+        return ammoRatio <= Mathf.Clamp01(lowAmmoRatio);
     }
 #if UNITY_EDITOR
     private void OnValidate()
