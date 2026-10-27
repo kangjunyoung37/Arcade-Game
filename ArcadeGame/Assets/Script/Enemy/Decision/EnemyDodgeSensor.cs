@@ -37,7 +37,7 @@ public sealed class EnemyDodgeSensor : MonoBehaviour
 
     private void Awake()
     {
-        _owner.GetComponent<EnemyController>();
+        _owner = GetComponent<EnemyController>();
         _agent = GetComponent<NavMeshAgent>();
     }
 
@@ -152,6 +152,38 @@ public sealed class EnemyDodgeSensor : MonoBehaviour
         top = groundPosition + Vector3.up * (height - radius);
 
     }
+
+    public bool CanTraverseDodgeSegment( Vector3 origin, Vector3 destination)
+    {
+        if (!isActiveAndEnabled || !CanNavigate || blockingMask.value == 0)
+            return false;
+
+        // 시작 위치에 이미 장애물이 겹쳤는지도 확인.
+        if (!HasStandingSpace(origin) || !HasStandingSpace(destination))
+            return false;
+
+        NavMeshQueryFilter filter = new NavMeshQueryFilter
+        {
+            agentTypeID = _agent.agentTypeID,
+            areaMask = _agent.areaMask
+        };
+
+        if (NavMesh.Raycast(origin, destination, out _, filter))
+            return false;
+
+        Vector3 movement = destination - origin;
+        float distanceSquared = movement.sqrMagnitude;
+
+        if (distanceSquared <= DirectionSqrEpsilon)
+            return true;
+
+        GetCapsule( origin, out Vector3 bottom, out Vector3 top, out float radius);
+
+        float distance = Mathf.Sqrt(distanceSquared);
+
+        return !Physics.CapsuleCast( bottom, top, radius, movement / distance, distance, blockingMask, QueryTriggerInteraction.Ignore);
+    }    
+       
 #if UNITY_EDITOR
     private const string TestMenu = "Test/Find Dodge Position";
     private const float TestLineDuration = 5f;

@@ -119,6 +119,14 @@ public sealed class EnemyController : MonoBehaviour
     [SerializeField] private HealthSystem healthSystem;
     [SerializeField, Min(0.1f)] private float hitPeekRecoveryDuration = 2f;
     [SerializeField] private bool seekCoverWhenPressureHigh = true;
+
+    [Header("Dodge")]
+    [SerializeField, Min(0.1f)] private float dodgeDuration = 0.45f;
+
+    [SerializeField, Min(0.1f)] private float dodgeCooldown = 3f;
+
+    [SerializeField, Min(0.1f)] private float dodgeRetryDelay = 0.5f;
+
     public float HitPeekRecoveryDuration => Mathf.Max(0.1f, hitPeekRecoveryDuration);
 
     public bool CanReactToHit => isActiveAndEnabled && healthSystem != null && healthSystem.isActiveAndEnabled && healthSystem.IsAlive;
@@ -141,6 +149,7 @@ public sealed class EnemyController : MonoBehaviour
     private float _nextAttackTime;
     private Vector3 _lastheardFootstepPosition;
     private float _lastHeardFootstepTime = float.NegativeInfinity;
+    private float _nextDodgeAttemptTime;
 
     public float SearchMoveTimeout => searchMoveTimeout;
     public float SearchLookDuration => searchLookDuration;
@@ -167,6 +176,7 @@ public sealed class EnemyController : MonoBehaviour
     public float CoverFastMoveEnterDistance => Mathf.Max(CoverFastMoveExitDistance + MinimumFastMoveDistanceGap, coverFastMoveEnterDistance);
     public float AlertReactionTime => alertReactionTime;
     public float AlertMemoryDuration => alertMemoryDuration;
+    public float DodgeDuration => Mathf.Max(0.1f, dodgeDuration);
 
     public bool HasTarget => target != null && target.gameObject.activeInHierarchy;
     public bool HasUsableWeapon => _weapon != null && _weapon.IsReadyForAI;
@@ -177,7 +187,7 @@ public sealed class EnemyController : MonoBehaviour
     public bool HasLoadedAmmunition => HasUsableWeapon && _weapon.LoadedRounds > 0;
     private bool ShouldDeferCoverForRetreat => CombatDecision != null && CombatDecision.isActiveAndEnabled && CombatDecision.ShouldPrioritizeRetreat();
     private bool ShouldSeekCoverForPressure => seekCoverWhenPressureHigh && CanReactToHit && CombatPressure != null && CombatPressure.isActiveAndEnabled && CombatPressure.IsHighPressure;
-
+    public bool IsDodging => DodgeState != null && _stateMachine != null && ReferenceEquals(_stateMachine.CurrentState, DodgeState);
     public Vector3 LastKnownAimPosition => LastKnownPlayerPosition + Vector3.up * targetAimHeight;
     
     public int ShotsPerPeek => Mathf.Max(1, shotsPerPeek);
@@ -198,6 +208,7 @@ public sealed class EnemyController : MonoBehaviour
     public IState AlertState { get; private set; }
 
     public EnemyIdleState IdleState { get; private set; }
+    public EnemyDodgeState DodgeState { get; private set; }
 
     private WeaponData EquippedWeaponData => _weapon != null ? _weapon.Data : null;
 
@@ -285,6 +296,8 @@ public sealed class EnemyController : MonoBehaviour
         if(healthSystem == null) TryGetComponent(out healthSystem);
         TryGetComponent(out EnemyCombatPressure combatPressure);
         CombatPressure = combatPressure;
+        TryGetComponent(out EnemyDodgeSensor dodgeSensor);
+        DodgeState = new EnemyDodgeState(this, _agent, dodgeSensor);
     }
 
     private void Start()
@@ -571,7 +584,8 @@ public sealed class EnemyController : MonoBehaviour
             ReferenceEquals(current, ChaseState) ||
             ReferenceEquals(current, SearchState) ||
             ReferenceEquals(current, AttackState) ||
-            ReferenceEquals(current, CoverState));
+            ReferenceEquals(current, CoverState)||
+            ReferenceEquals(current, DodgeState));
         
     }
     
@@ -642,7 +656,7 @@ public sealed class EnemyController : MonoBehaviour
     }
     private void UpdateReloadDecision(float deltaTime)
     {
-        if(_stateMachine != null && ReferenceEquals(_stateMachine.CurrentState, CoverState))
+        if(_stateMachine != null && (ReferenceEquals(_stateMachine.CurrentState, CoverState) || ReferenceEquals(_stateMachine.CurrentState, DodgeState)))
         {
             _timeWithoutSight = 0f;
             return;
@@ -727,6 +741,9 @@ public sealed class EnemyController : MonoBehaviour
     }
     public bool TryRequestAttack()
     {
+        if(IsDodging)
+            return false;
+
         if(Time.time < _nextAttackTime)
             return false;
 
@@ -851,6 +868,37 @@ public sealed class EnemyController : MonoBehaviour
 
         return ammoRatio <= Mathf.Clamp01(lowAmmoRatio);
     }
+    public bool TryStartDodge()
+    {
+        if (!isActiveAndEnabled || !CanReactToHit || !CanNaviagate || !HasUsableWeapon || !HasTarget || !CanSeePlayer || WeaponIsReloading || DodgeState == null || _stateMachine == null)
+            return false;
+        
+        //전투 상태에서만 시작
+        if (!ReferenceEquals(_stateMachine.CurrentState, AttackState))
+            return false;
+
+        float now = Time.time;
+
+        if (now < _nextDodgeAttemptTime)
+            return false;
+
+        //매 프레임 다시 검사하지 않도록 제한
+        _nextDodgeAttemptTime = now + Mathf.Max(0.1f, dodgeRetryDelay);
+
+        if (!DodgeState.TryPrepare())
+            return false;
+
+        ChangeState(DodgeState);
+        return true;
+    }
+
+    public void NotifyDodgeExited()
+    {
+        _nextDodgeAttemptTime = Mathf.Max(
+            _nextDodgeAttemptTime,
+            Time.time + Mathf.Max(0.1f, dodgeCooldown));
+    }
+
 #if UNITY_EDITOR
     private void OnValidate()
     {
@@ -858,8 +906,11 @@ public sealed class EnemyController : MonoBehaviour
         _viewDotThreshold = Mathf.Cos(viewAngle * 0.5f * Mathf.Deg2Rad);
         _attackAimDotThreshold = Mathf.Cos(attackAimTolerance * Mathf.Deg2Rad);
     }
-
     private const string EnterCoverTestMenu = "Test/Enter Cover";
+    private const string SimulateCombatHitMenu = "Test/Simulate Combat Hit";
+    private const string SimulatePeekHitMenu = "Test/Simulate Peek Hit";
+    private const string StartDodgeTestMenu = "Test/Start Dodge";
+    
     [ContextMenu(EnterCoverTestMenu)]
     private void TestEnterCover()
     {
@@ -878,8 +929,6 @@ public sealed class EnemyController : MonoBehaviour
             this);
     }
 
-    private const string SimulatePeekHitMenu = "Test/Simulate Peek Hit";
-
     [ContextMenu(SimulatePeekHitMenu)]
     private void TestSimulatePeekHit()
     {
@@ -892,9 +941,6 @@ public sealed class EnemyController : MonoBehaviour
         bool accepted = CoverState.QueueHitReaction();
         Debug.Log(accepted ? "피격 반응 예약 완료. 다음 Tick에서 엄폐 복귀를 시도합니다." : "현재는 피킹 이동 또는 피킹 사격 단계가 아닙니다.", this);
     }
-
-    private const string SimulateCombatHitMenu =
-    "Test/Simulate Combat Hit";
 
     [ContextMenu(SimulateCombatHitMenu)]
     private void TestSimulateCombatHit()
@@ -918,6 +964,26 @@ public sealed class EnemyController : MonoBehaviour
             $"High Pressure: {CombatPressure.IsHighPressure}",
             this);
     }
+
+    [ContextMenu(StartDodgeTestMenu)]
+    private void TestStartDodge()
+    {
+        if (!Application.isPlaying)
+        {
+            Debug.LogWarning("Play 모드에서 실행하세요.", this);
+            return;
+        }
+
+        bool started = TryStartDodge();
+
+        Debug.Log(
+            started
+                ? "구르기 상태 진입."
+                : "구르기 시작 실패: Attack 상태, 시야, 체력, 재장전, " +
+                "쿨다운, 회피 후보를 확인하세요.",
+            this);
+    }
+
 #endif
 
 }
