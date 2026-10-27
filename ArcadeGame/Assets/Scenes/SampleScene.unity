@@ -16087,6 +16087,14 @@ MonoBehaviour:
   healthSystem: {fileID: 2039950113}
   hitPeekRecoveryDuration: 2
   seekCoverWhenPressureHigh: 1
+  dodgeDuration: 0.45
+  dodgeCooldown: 3
+  dodgeRetryDelay: 0.5
+  autoDodgeOnHit: 1
+  closeHitDodgeChance: 0.492
+  highPressureDodgeChance: 0.74
+  autoDodgeDecisionInterval: 1
+  dodgeHitMemoryDuration: 0.35
 --- !u!195 &2039950121
 NavMeshAgent:
   m_ObjectHideFlags: 0

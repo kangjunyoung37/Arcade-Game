@@ -127,6 +127,21 @@ public sealed class EnemyController : MonoBehaviour
 
     [SerializeField, Min(0.1f)] private float dodgeRetryDelay = 0.5f;
 
+    [SerializeField] private bool autoDodgeOnHit = true;
+
+    [Tooltip("거리 기반 후퇴가 필요한 상황에서 피격 시 구르기 확률")]
+    [SerializeField, Range(0f, 1f)] private float closeHitDodgeChance = 0.65f;
+
+    [Tooltip("근접 상황은 아니지만 고위험 상태에서 피격 시 구르기 확률")]
+    [SerializeField, Range(0f, 1f)] private float highPressureDodgeChance = 0.35f;
+
+    [Tooltip("확률 판단 사이의 최소 간격")]
+    [SerializeField, Min(0.1f)] private float autoDodgeDecisionInterval = 1f;
+
+    [Tooltip("처리되지 않은 피격 예약의 유효 시간")]
+    [SerializeField, Min(0.1f)] private float dodgeHitMemoryDuration = 0.35f;
+
+
     public float HitPeekRecoveryDuration => Mathf.Max(0.1f, hitPeekRecoveryDuration);
 
     public bool CanReactToHit => isActiveAndEnabled && healthSystem != null && healthSystem.isActiveAndEnabled && healthSystem.IsAlive;
@@ -150,7 +165,9 @@ public sealed class EnemyController : MonoBehaviour
     private Vector3 _lastheardFootstepPosition;
     private float _lastHeardFootstepTime = float.NegativeInfinity;
     private float _nextDodgeAttemptTime;
-
+    private bool _pendingDodgeHit;
+    private float _pendingDodgeHitTime = float.NegativeInfinity;
+    private float _nextAutoDodgeDecisionTime;
     public float SearchMoveTimeout => searchMoveTimeout;
     public float SearchLookDuration => searchLookDuration;
     public float SearchTurnSpeed => searchTurnSpeed;
@@ -319,6 +336,8 @@ public sealed class EnemyController : MonoBehaviour
         UpdatePerception(deltaTime);
         UpdateCoverDecision();
 
+        UpdateDodgeReaction(deltaTime);
+        
         _stateMachine.Tick(deltaTime);
         UpdateReloadDecision(deltaTime);
     }
@@ -355,6 +374,8 @@ public sealed class EnemyController : MonoBehaviour
         _hasPendingNoise = false;
         CanSeePlayer = false;
         _lastHeardFootstepTime = float.NegativeInfinity;
+        _pendingDodgeHit = false;
+        _pendingDodgeHitTime = float.NegativeInfinity;      
     }
     
     public void ChangeState(IState nextState)
@@ -840,18 +861,58 @@ public sealed class EnemyController : MonoBehaviour
 
     private void HandleDamageReceived(DamageInfo damageInfo)
     {
-        if(!CanReactToHit)
+        if (!CanReactToHit)
             return;
-        if(CombatPressure != null)
+
+        // 모든 피격은 기존처럼 위험도에 반영
+        if (CombatPressure != null)
             CombatPressure.RegisterHit();
+        #if UNITY_EDITOR
+        string stateName =
+            _stateMachine?.CurrentState?.GetType().Name ?? "None";
+
+        float pressure = CombatPressure != null
+            ? CombatPressure.PressureNormalized
+            : 0f;
+
+        bool highPressure = CombatPressure != null &&
+            CombatPressure.IsHighPressure;
+
+        Debug.Log(
+            $"[실제 피격] Enemy={name}, " +
+            $"State={stateName}, " +
+            $"Pressure={pressure:F2}, High={highPressure}, " +
+            $"DodgeWait={Mathf.Max(0f, _nextDodgeAttemptTime - Time.time):F2}, " +
+            $"DecisionWait={Mathf.Max(0f, _nextAutoDodgeDecisionTime - Time.time):F2}, " +
+            $"Visible={CanSeePlayer}, Reloading={WeaponIsReloading}",
+            this);
+        #endif
+        if (_stateMachine == null || _stateMachine.CurrentState == null)
+            return;
+  
+        IState current = _stateMachine.CurrentState;
+
+        // 엄폐 중에는 기존 피킹 복귀를 우선
+        if (CoverState != null && ReferenceEquals(current, CoverState))
+        {
+            CoverState.QueueHitReaction();
+            return;
+        }
+
+        // 자동 구르기는 Attack 상태에서 받은 피격만 허용
+        if (!autoDodgeOnHit || !ReferenceEquals(current, AttackState))
+            return;
         
-        if( _stateMachine == null || CoverState == null )
-            return;
+        float now = Time.time;
 
-        if(!ReferenceEquals(_stateMachine.CurrentState, CoverState))
+        // 쿨다운 중 피격을 나중에 실행할 구르기로 저장하지 않음.
+        if (now < _nextDodgeAttemptTime || now < _nextAutoDodgeDecisionTime)
             return;
-
-        CoverState.QueueHitReaction();
+        
+        // 이벤트에서는 이동하거나 상태를 전환하지 않음
+        // 같은 프레임의 여러 피격은 하나의 반응 예약으로 합침
+        _pendingDodgeHit = true;
+        _pendingDodgeHitTime = now;
     }
 
     private bool ShouldSeekCoverForReload()
@@ -899,6 +960,51 @@ public sealed class EnemyController : MonoBehaviour
             Time.time + Mathf.Max(0.1f, dodgeCooldown));
     }
 
+    private void UpdateDodgeReaction(float deltaTime)
+    {
+        if (deltaTime <= 0f || !_pendingDodgeHit)
+            return;
+
+        // 이 예약은 이번 판단에서 한 번만 사용.
+        _pendingDodgeHit = false;
+
+        float now = Time.time;
+        float memoryDuration = Mathf.Max(0.1f, dodgeHitMemoryDuration);
+
+        if (now - _pendingDodgeHitTime > memoryDuration)
+            return;
+
+        if (!autoDodgeOnHit || !CanReactToHit ||!CanNaviagate ||!HasUsableWeapon ||!HasTarget || !CanSeePlayer || WeaponIsReloading || DodgeState == null || _stateMachine == null)
+            return;
+        
+        if (!ReferenceEquals(_stateMachine.CurrentState, AttackState))
+            return;
+
+        if ( now < _nextDodgeAttemptTime || now < _nextAutoDodgeDecisionTime)
+            return;
+    
+        // 기존 후퇴 거리와 같은 기준을 사용.
+        bool needsRetreat = ShouldDeferCoverForRetreat;
+
+        bool underHighPressure = CombatPressure != null && CombatPressure.isActiveAndEnabled && CombatPressure.IsHighPressure;
+
+        if (!needsRetreat && !underHighPressure)
+            return;
+
+        float chance = Mathf.Clamp01( needsRetreat ? closeHitDodgeChance : highPressureDodgeChance);
+
+        if (chance <= 0f)
+            return;
+
+        // 확률에서 탈락해도 다음 판단까지 기다림
+        _nextAutoDodgeDecisionTime = now + Mathf.Max(0.1f, autoDodgeDecisionInterval);
+
+        // 1이면 반드시 확률 검사를 통과
+        if (chance < 1f && UnityEngine.Random.value >= chance)
+            return;
+
+        TryStartDodge();
+    }
 #if UNITY_EDITOR
     private void OnValidate()
     {
