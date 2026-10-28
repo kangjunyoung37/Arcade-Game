@@ -10,7 +10,9 @@ public sealed class EnemyController : MonoBehaviour
     private const float MinimumCoverDecisionInterval = 0.1f;
     private const float MinimumCoverMoveSpeed = 0.1f;
     private const float MinimumFastMoveDistanceGap = 0.5f;
-
+    [Header("Behavior Profile")]
+    [SerializeField] private EnemyBehaviorProfile behaviorProfile;
+    
     [Header("Idle")]
     [SerializeField, Min(0f)]
     private float minIdleDuration = 1f;
@@ -43,11 +45,6 @@ public sealed class EnemyController : MonoBehaviour
     [Header("Field of View")]
     [SerializeField, Range(0f, 360f)]
     private float viewAngle = 120f;
-
-    public float MinIdleDuration => minIdleDuration;
-    public float MaxIdleDuration => maxIdleDuration;
-    public float DetectionInterval => detectionInterval;
-    public float PatrolStoppingDistance => patrolStoppingDistance;
 
     [Header("Patrol")]
     [SerializeField] private EnemyPatrolRoute patrolRoute;
@@ -141,7 +138,6 @@ public sealed class EnemyController : MonoBehaviour
     [Tooltip("처리되지 않은 피격 예약의 유효 시간")]
     [SerializeField, Min(0.1f)] private float dodgeHitMemoryDuration = 0.35f;
 
-
     public float HitPeekRecoveryDuration => Mathf.Max(0.1f, hitPeekRecoveryDuration);
 
     public bool CanReactToHit => isActiveAndEnabled && healthSystem != null && healthSystem.isActiveAndEnabled && healthSystem.IsAlive;
@@ -194,6 +190,10 @@ public sealed class EnemyController : MonoBehaviour
     public float AlertReactionTime => alertReactionTime;
     public float AlertMemoryDuration => alertMemoryDuration;
     public float DodgeDuration => Mathf.Max(0.1f, dodgeDuration);
+    public float MinIdleDuration => minIdleDuration;
+    public float MaxIdleDuration => maxIdleDuration;
+    public float DetectionInterval => detectionInterval;
+    public float PatrolStoppingDistance => patrolStoppingDistance;
 
     public bool HasTarget => target != null && target.gameObject.activeInHierarchy;
     public bool HasUsableWeapon => _weapon != null && _weapon.IsReadyForAI;
@@ -205,6 +205,12 @@ public sealed class EnemyController : MonoBehaviour
     private bool ShouldDeferCoverForRetreat => CombatDecision != null && CombatDecision.isActiveAndEnabled && CombatDecision.ShouldPrioritizeRetreat();
     private bool ShouldSeekCoverForPressure => seekCoverWhenPressureHigh && CanReactToHit && CombatPressure != null && CombatPressure.isActiveAndEnabled && CombatPressure.IsHighPressure;
     public bool IsDodging => DodgeState != null && _stateMachine != null && ReferenceEquals(_stateMachine.CurrentState, DodgeState);
+    public bool CanUseStrafe => behaviorProfile == null || behaviorProfile.AllowStrafe;
+    public bool CanUseApproach => behaviorProfile == null || behaviorProfile.AllowApproach;
+    public bool CanUseRetreat => behaviorProfile == null || behaviorProfile.AllowRetreat;
+    public bool CanUseCover => behaviorProfile == null || behaviorProfile.AllowCover;
+    public bool CanUseDodge =>behaviorProfile == null || behaviorProfile.AllowDodge;
+    public bool CanUseLinearMove => behaviorProfile != null && behaviorProfile.AllowLinearMove;
     public Vector3 LastKnownAimPosition => LastKnownPlayerPosition + Vector3.up * targetAimHeight;
     
     public int ShotsPerPeek => Mathf.Max(1, shotsPerPeek);
@@ -700,6 +706,8 @@ public sealed class EnemyController : MonoBehaviour
 
     private void UpdateCoverDecision()
     {
+        if (!CanUseCover)
+            return;
         if(!isActiveAndEnabled || !HasUsableWeapon || !CanNaviagate || !HasTarget || !CanSeePlayer || CoverState == null || _stateMachine == null)
             return;
 
@@ -803,6 +811,8 @@ public sealed class EnemyController : MonoBehaviour
 
     public bool TryEnterCover(bool reloadOnArrival = false)
     {
+        if (!CanUseCover)
+            return false;
         if (!isActiveAndEnabled ||!CanNaviagate ||!HasUsableWeapon ||_stateMachine == null || _stateMachine.CurrentState == null ||CoverState == null ||ReferenceEquals(_stateMachine.CurrentState, CoverState) ||!HasTarget || !CanSeePlayer)
             return false;
     
@@ -931,6 +941,9 @@ public sealed class EnemyController : MonoBehaviour
     }
     public bool TryStartDodge()
     {
+        if (!CanUseDodge)
+            return false;
+
         if (!isActiveAndEnabled || !CanReactToHit || !CanNaviagate || !HasUsableWeapon || !HasTarget || !CanSeePlayer || WeaponIsReloading || DodgeState == null || _stateMachine == null)
             return false;
         
@@ -962,6 +975,11 @@ public sealed class EnemyController : MonoBehaviour
 
     private void UpdateDodgeReaction(float deltaTime)
     {
+        if (!CanUseDodge)
+        {
+            _pendingDodgeHit = false;
+            return;
+        }
         if (deltaTime <= 0f || !_pendingDodgeHit)
             return;
 
