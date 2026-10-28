@@ -35,28 +35,38 @@ public class EnemyStrafeMovement : MonoBehaviour
     
     [Header("Apprach")]
     [SerializeField, Min(MinimumInterval)] private float approachRepathInterval = 0.2f;
+   
+    [Header("Linear Move")]
+    [SerializeField, Min(MinimumInterval)] private float minLinearMoveDistance = 4f;
+    [SerializeField, Min(MinimumInterval)] private float maxLinearMoveDistance = 7f;
+    [Tooltip("직선 이동을 시작할 때 플레이어 방향 접근을 선택할 확률")]
+    [SerializeField, Range(0f, 1f)] private float linearApproachChance = 0.4f;
     
+    [Tooltip("접근 시 플레이어와 남겨 둘 최소 수평 거리")]
+    [SerializeField, Min(MinimumInterval)] private float linearApproachStopDistance = 2f;
     private EnemyController _owner;
     private EnemyCombatMoveIntent _movementIntent;
     private NavMeshAgent _agent;
     private NavMeshPath _approachPath;
-    private bool _running;
-    private bool _moving;
     private int _side;
     
     private float _remainingApproachRepath;
     private float _remainingPause;
     private float _remainingMoveTime;
-
     private float _previousSpeed;
     private float _previousAcceleration;
     private float _previousStoppingDistance;
     private bool _previousUpdateRotation;
     private float _remainingRetreatRepath;
     private bool _previousAutoBraking;
+    private bool _running;
+    private bool _moving;
+    private bool _linearMoveApproaching;
+    private Vector3 _linearDestination;
     private bool CanNavigate => _agent != null && _agent.isActiveAndEnabled && _agent.isOnNavMesh;
     public bool CanExecuteCombatMovement => _running && isActiveAndEnabled && CanNavigate;
     public bool ApproachDestinationReached{ get; private set;}
+    public bool LinearMoveFinished { get; private set; }
     private void Awake()
     {
         _owner = GetComponent<EnemyController>();
@@ -74,6 +84,8 @@ public class EnemyStrafeMovement : MonoBehaviour
         _remainingRetreatRepath = 0f;
         _remainingApproachRepath = 0f;
         ApproachDestinationReached = false;
+        LinearMoveFinished = false;
+        _linearMoveApproaching = false;
 
         _owner.StopMoving();
         _agent.speed = Mathf.Max(MinimumInterval, moveSpeed);
@@ -103,6 +115,8 @@ public class EnemyStrafeMovement : MonoBehaviour
         _running = false;
         _remainingApproachRepath = 0f;
         ApproachDestinationReached = false;
+        LinearMoveFinished = false;
+        _linearMoveApproaching = false;
     }
     public void Tick(float deltaTime, EnemyCombatMoveIntent intent)
     {
@@ -120,6 +134,7 @@ public class EnemyStrafeMovement : MonoBehaviour
             _remainingRetreatRepath = 0f;
             _remainingApproachRepath = 0f;
             ApproachDestinationReached = false;
+            LinearMoveFinished = false;
 
             switch (intent)
             {
@@ -128,6 +143,7 @@ public class EnemyStrafeMovement : MonoBehaviour
                     break;
                 
                 case EnemyCombatMoveIntent.Approach:
+                case EnemyCombatMoveIntent.LinearMove:
                     _agent.autoBraking = true;
                     break;
                 
@@ -135,6 +151,12 @@ public class EnemyStrafeMovement : MonoBehaviour
                     _agent.autoBraking = _previousAutoBraking;
                     break;
             }
+        }
+
+        if (_movementIntent == EnemyCombatMoveIntent.LinearMove)
+        {
+            TickLinearMove(deltaTime);
+            return;
         }
 
         if(_movementIntent == EnemyCombatMoveIntent.Hold)
@@ -432,6 +454,160 @@ public class EnemyStrafeMovement : MonoBehaviour
 
         if(decision != null && decision.isActiveAndEnabled)
             decision.ReportMovmentBlocked(intent);
+    }
+
+    private void TickLinearMove(float deltaTime)
+    {
+        if (LinearMoveFinished)
+            return;
+
+        if (!_owner.CanUseLinearMove || !_owner.HasTarget || !_owner.CanSeePlayer)
+        {
+            FinishLinearMove();
+            return;
+        }
+
+        if (!_moving)
+        {
+            if (!TryStartLinearMove())
+                FinishLinearMove();
+
+            return;
+        }
+        if (_linearMoveApproaching)
+        {
+            Vector3 origin = _agent.nextPosition - Vector3.up * _agent.baseOffset;
+
+            Vector3 toTarget = _owner.LastKnownPlayerPosition - origin;
+
+            toTarget.y = 0f;
+
+            float stopDistance = Mathf.Max( MinimumInterval, linearApproachStopDistance);
+
+            if (toTarget.sqrMagnitude <= stopDistance * stopDistance)
+            {
+                FinishLinearMove();
+                return;
+            }
+        }
+        _remainingMoveTime -= deltaTime;
+
+        // 끼임 상태이거나 경로 계산이 끝나지 않은 경우
+        if (_remainingMoveTime <= 0f)
+        {
+            FinishLinearMove();
+            return;
+        }
+
+        if (_agent.pathPending)
+            return;
+
+        if (!_agent.hasPath || _agent.pathStatus != NavMeshPathStatus.PathComplete)
+        {
+            FinishLinearMove();
+            return;
+        }
+
+        if (_agent.remainingDistance <= _agent.stoppingDistance)
+        {
+            FinishLinearMove();
+            return;
+        }
+
+        /*if (_agent.Raycast(_linearDestination, out _))
+        {
+            FinishLinearMove();
+        }*/
+    }
+
+    private bool TryStartLinearMove()
+    {
+        _linearMoveApproaching = false;
+
+        Vector3 origin = _agent.nextPosition - Vector3.up * _agent.baseOffset;
+
+        Vector3 toTarget = _owner.LastKnownPlayerPosition - origin;
+        toTarget.y = 0f;
+
+        if (toTarget.sqrMagnitude <= DirectionSqrEpsion)
+            return false;
+
+        float targetDistance = toTarget.magnitude;
+        Vector3 forwardDirection = toTarget / targetDistance;
+
+        float minimum = Mathf.Max(MinimumInterval,minLinearMoveDistance);
+        float maximum = Mathf.Max(minimum,maxLinearMoveDistance);
+        float distance = Random.Range(minimum, maximum);
+        float chance = Mathf.Clamp01(linearApproachChance);
+
+        bool chooseApproach = chance > 0f && (chance >= 1f || Random.value < chance);
+        bool started = false;
+
+        // 확률에 따라 플레이어 방향으로 접근
+        if (chooseApproach)
+        {
+            started = TryStartLinearApproach( origin, forwardDirection, targetDistance, distance);
+            _linearMoveApproaching = started;
+        }
+
+        // 접근을 선택하지 않았거나, 너무 가깝거나 길이 막혔다면 좌우 이동을 시도합니다
+        if (!started)
+        {
+            Vector3 sideDirection = Vector3.Cross(Vector3.up, forwardDirection);
+
+            if (Random.value < 0.5f)
+                sideDirection = -sideDirection;
+
+            Vector3 candidate = origin + sideDirection * distance;
+
+            started = TryMoveToCandidate(origin, candidate, false);
+
+            if (!started)
+            {
+                candidate = origin - sideDirection * distance;
+                started = TryMoveToCandidate(origin, candidate, false);
+            }
+        }
+
+        if (!started)
+            return false;
+
+        _linearDestination = _agent.destination;
+        float travelDistance = Vector3.Distance(origin, _linearDestination);
+        float speed = Mathf.Max(MinimumInterval, _agent.speed);
+        _remainingMoveTime = travelDistance / speed + Mathf.Max(MinimumInterval, moveTimeout);
+        return true;
+    }
+    private bool TryStartLinearApproach( Vector3 origin, Vector3 direction, float targetDistance, float requestedDistance)
+    {
+        float stopDistance = Mathf.Max( MinimumInterval, linearApproachStopDistance);
+
+        // 목적지가 플레이어 쪽으로 조금 이동할 수 있으므로 여유를 둡니다
+        float samplingMargin = Mathf.Max(0f, sampleRadius);
+
+        float availableDistance = targetDistance - stopDistance - samplingMargin;
+
+        float minimumTravel = _agent.stoppingDistance * MinimumTravelMultiplier;
+
+        if (availableDistance <= minimumTravel)
+            return false;
+
+        // 원래 선택한 이동 거리보다 안전하게 접근할 수 있는 거리가 짧으면 줄입니다
+        float travelDistance = Mathf.Min(requestedDistance, availableDistance);
+
+        if (travelDistance <= minimumTravel)
+            return false;
+
+        Vector3 candidate = origin + direction * travelDistance;
+        return TryMoveToCandidate(origin, candidate, false);
+    }
+    private void FinishLinearMove()
+    {
+        _owner.StopMoving();
+
+        _moving = false;
+        _linearMoveApproaching = false;
+        LinearMoveFinished = true;
     }
     private void OnDisable()
     {

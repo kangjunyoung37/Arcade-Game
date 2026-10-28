@@ -16032,10 +16032,11 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 092fd96873d06f546a815f6cdc1ac875, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  behaviorProfile: {fileID: 11400000, guid: 620208920abb68145a9e2eeb25561062, type: 2}
   minIdleDuration: 1
   maxIdleDuration: 3
   detectionInterval: 0.15
-  detectionRange: 40
+  detectionRange: 20
   sightBlockingMask:
     serializedVersion: 2
     m_Bits: 1024
@@ -16091,7 +16092,7 @@ MonoBehaviour:
   dodgeCooldown: 3
   dodgeRetryDelay: 0.5
   autoDodgeOnHit: 1
-  closeHitDodgeChance: 0.492
+  closeHitDodgeChance: 1
   highPressureDodgeChance: 0.74
   autoDodgeDecisionInterval: 1
   dodgeHitMemoryDuration: 0.35
@@ -16163,6 +16164,10 @@ MonoBehaviour:
   sampleRadius: 0.4
   maxHeightDifference: 0.5
   approachRepathInterval: 0.2
+  minLinearMoveDistance: 4
+  maxLinearMoveDistance: 7
+  linearApproachChance: 0.5
+  linearApproachStopDistance: 7
 --- !u!114 &2039950124
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -16188,6 +16193,9 @@ MonoBehaviour:
   blockedPatternCooldown: 2
   pressureStrafeMultiplier: 2
   pressureHoldMultiplier: 0.25
+  minLinearMoveInterval: 0.5
+  maxLinearMoveInterval: 1
+  linearMoveChance: 1
 --- !u!114 &2039950125
 MonoBehaviour:
   m_ObjectHideFlags: 0

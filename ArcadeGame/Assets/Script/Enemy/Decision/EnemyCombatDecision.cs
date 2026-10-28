@@ -5,7 +5,8 @@ public enum EnemyCombatMoveIntent
     Strafe,
     Retreat,
     Approach,
-    Hold
+    Hold,
+    LinearMove
 }
 [DisallowMultipleComponent]
 [RequireComponent(typeof(EnemyController))]
@@ -42,10 +43,16 @@ public sealed class EnemyCombatDecision : MonoBehaviour
     [SerializeField, Min(1f)] private float pressureStrafeMultiplier = 2f;
     [SerializeField, Range(0f, 1f)] private float pressureHoldMultiplier = 0.25f;
 
+    [Header("Linear Move Decision")]
+    [SerializeField, Min(MinimumDuration)] private float minLinearMoveInterval = 3f;
+    [SerializeField, Min(MinimumDuration)] private float maxLinearMoveInterval = 6f;
+    [SerializeField, Range(0f, 1f)]private float linearMoveChance = 0.5f;
+
     private EnemyController _owner;
     private float _remainingPatternTime;
     private float _strafeBlockedUntil;
     private float _approachBlockedUntil;
+    private float _nextLinearMoveDecisionTime;
     private bool _hasSelection;
     public EnemyCombatMoveIntent Intent {get; private set;}
     private float RemainingPatternTime => _remainingPatternTime;
@@ -79,6 +86,9 @@ public sealed class EnemyCombatDecision : MonoBehaviour
         Intent = EnemyCombatMoveIntent.Hold;
         _remainingPatternTime = 0f;
         _hasSelection = false;
+        if (_owner != null && _owner.CanUseLinearMove && Time.time >= _nextLinearMoveDecisionTime)
+            ScheduleNextLinearMoveDecision();
+ 
     }
 
     public EnemyCombatMoveIntent Evaluate(float deltaTime)
@@ -110,8 +120,42 @@ public sealed class EnemyCombatDecision : MonoBehaviour
         
         float now = Time.time;
 
-        bool strafeAllowed = now >= _strafeBlockedUntil;
-        bool approachAllowed = now >= _approachBlockedUntil && !IsUnderHighPressure;
+        // 도착 또는 실패할 때까지 같은 Intent를 유지합니다
+        if (Intent == EnemyCombatMoveIntent.LinearMove)
+        {
+            if (_owner.CanUseLinearMove && !movement.LinearMoveFinished)
+                return Intent;
+
+            // 이동이 끝나면 반드시 Hold를 한 번 거칩니다
+            // 같은 LinearMove가 연속 선택되어 초기화되지 않는 문제를 방지
+            Intent = EnemyCombatMoveIntent.Hold;
+            _remainingPatternTime = 0f;
+
+            ScheduleNextLinearMoveDecision();
+            return Intent;
+        }
+
+        bool canSelectLinearMove = Intent == EnemyCombatMoveIntent.Hold || _remainingPatternTime <= deltaTime;
+        // 진행 중인 다른 패턴이 끝나는 시점에만 새 이동을 선택합니다.
+        if (_owner.CanUseLinearMove && now >= _nextLinearMoveDecisionTime && canSelectLinearMove)
+        {
+            ScheduleNextLinearMoveDecision();
+            float chance = Mathf.Clamp01(linearMoveChance);
+
+            bool selected = chance > 0f && (chance >= 1f || Random.value < chance);
+
+            if (selected)
+            {
+                Intent = EnemyCombatMoveIntent.LinearMove;
+                _remainingPatternTime = 0f;
+                _hasSelection = true;
+
+                return Intent;
+            }
+        }
+
+        bool strafeAllowed = _owner.CanUseStrafe && now >= _strafeBlockedUntil;
+        bool approachAllowed =  _owner.CanUseApproach && now >= _approachBlockedUntil && !IsUnderHighPressure;
 
         float stopDistance = ApproachStopDistance;
         
@@ -192,6 +236,15 @@ public sealed class EnemyCombatDecision : MonoBehaviour
         //난수가 최댓값인 경우에도 가중치 0인 행동은 선택 x
         return approach > 0f ? EnemyCombatMoveIntent.Approach : EnemyCombatMoveIntent.Strafe;
     }
+
+    private void ScheduleNextLinearMoveDecision()
+    {
+        float minimum = Mathf.Max( MinimumDuration, minLinearMoveInterval);
+
+        float maximum = Mathf.Max( minimum, maxLinearMoveInterval);
+
+        _nextLinearMoveDecisionTime = Time.time + Random.Range(minimum, maximum);
+    }
     
     public void ReportMovmentBlocked(EnemyCombatMoveIntent intent)
     {
@@ -213,7 +266,7 @@ public sealed class EnemyCombatDecision : MonoBehaviour
 
     public bool ShouldPrioritizeRetreat()
     {
-        if(!isActiveAndEnabled || _owner == null || !_owner.HasTarget || !_owner.CanSeePlayer)
+        if(!isActiveAndEnabled || _owner == null || !_owner.CanUseRetreat || !_owner.HasTarget || !_owner.CanSeePlayer)
             return false;
         
         Vector3 difference = _owner.LastKnownPlayerPosition - transform.position;
