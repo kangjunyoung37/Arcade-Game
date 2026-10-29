@@ -16096,6 +16096,10 @@ MonoBehaviour:
   highPressureDodgeChance: 0.74
   autoDodgeDecisionInterval: 1
   dodgeHitMemoryDuration: 0.35
+  suppressionChance: 1
+  suppressionDuration: 2
+  maxSuppressionShots: 20
+  suppressionCooldown: 4
 --- !u!195 &2039950121
 NavMeshAgent:
   m_ObjectHideFlags: 0

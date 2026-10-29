@@ -137,6 +137,12 @@ public sealed class EnemyController : MonoBehaviour
 
     [Tooltip("처리되지 않은 피격 예약의 유효 시간")]
     [SerializeField, Min(0.1f)] private float dodgeHitMemoryDuration = 0.35f;
+    
+    [Header("Suppression")]
+    [SerializeField, Range(0f, 1f)] private float suppressionChance = 0.5f;
+    [SerializeField, Min(0.1f)] private float suppressionDuration = 1.2f;
+    [SerializeField, Min(1)] private int maxSuppressionShots = 3;
+    [SerializeField, Min(0.1f)]private float suppressionCooldown = 4f;
 
     public float HitPeekRecoveryDuration => Mathf.Max(0.1f, hitPeekRecoveryDuration);
 
@@ -194,7 +200,9 @@ public sealed class EnemyController : MonoBehaviour
     public float MaxIdleDuration => maxIdleDuration;
     public float DetectionInterval => detectionInterval;
     public float PatrolStoppingDistance => patrolStoppingDistance;
-
+    public float SuppressionChance => Mathf.Clamp01(suppressionChance);
+    public float SuppressionDuration => Mathf.Max(0.1f, suppressionDuration);
+    public float SuppressionCooldown => Mathf.Max(0.1f, suppressionCooldown);
     public bool HasTarget => target != null && target.gameObject.activeInHierarchy;
     public bool HasUsableWeapon => _weapon != null && _weapon.IsReadyForAI;
     public bool WeaponNeedsReload => HasUsableWeapon && _weapon.NeedsReload;
@@ -211,10 +219,12 @@ public sealed class EnemyController : MonoBehaviour
     public bool CanUseCover => behaviorProfile == null || behaviorProfile.AllowCover;
     public bool CanUseDodge =>behaviorProfile == null || behaviorProfile.AllowDodge;
     public bool CanUseLinearMove => behaviorProfile != null && behaviorProfile.AllowLinearMove;
+    public bool CanUseSuppression => behaviorProfile != null && behaviorProfile.AllowSuppression;
     public Vector3 LastKnownAimPosition => LastKnownPlayerPosition + Vector3.up * targetAimHeight;
     
     public int ShotsPerPeek => Mathf.Max(1, shotsPerPeek);
     public int MaxPeekCycles => Mathf.Max(1, maxPeekCycles);
+    public int MaxSuppressionShots => Mathf.Max(1, maxSuppressionShots);
 
     public EnemyCombatPressure CombatPressure { get; private set; }
     public EnemyStrafeMovement StrafeMovement {get; private set;}
@@ -733,20 +743,26 @@ public sealed class EnemyController : MonoBehaviour
         TryEnterCover(reloadOnArrival: reloadRequested);
 
     }
-    public void FaceLastKnownPosition(float deletaTime)
+    public void FaceLastKnownPosition(float deltaTime)
     {
-        Vector3 direction = LastKnownPlayerPosition - transform.position;
-        direction.y = 0f;
-        if(direction.sqrMagnitude <= FacingDirectionSqrEpsilon)
-        {
-            return;
-        }
-        Quaternion targetRotation = Quaternion.LookRotation(direction);
-        transform.rotation = Quaternion.RotateTowards(
-            transform.rotation,
-            targetRotation,
-            alertTrunSpeed * deletaTime);
+        FacePosition(LastKnownPlayerPosition, deltaTime);
     }
+
+    public void FacePosition(Vector3 position, float deltaTime)
+    {
+        if (deltaTime <= 0f)
+            return;
+
+        Vector3 direction = position - transform.position;
+        direction.y = 0f;
+
+        if (direction.sqrMagnitude <= FacingDirectionSqrEpsilon)
+            return;
+
+        Quaternion targetRotation = Quaternion.LookRotation(direction);
+        transform.rotation = Quaternion.RotateTowards( transform.rotation, targetRotation, alertTrunSpeed * deltaTime);
+    }
+
     public bool IsTargetInAttackRange()
     {
         if(!HasTarget || !CanSeePlayer)
@@ -857,7 +873,7 @@ public sealed class EnemyController : MonoBehaviour
             _nextAttackTime = Time.time + Mathf.Max(WeaponData.MinimumShotInterval, BurstCooldown);
             return;
         }
-        _nextAttackTime = Time.time + Mathf.Max(WeaponData.MinimumShotInterval, BurstCooldown);
+        _nextAttackTime = Time.time + Mathf.Max(WeaponData.MinimumShotInterval, AttackInterval);
     }
 
     public float SampleCoverHoldDuration()
@@ -1022,6 +1038,50 @@ public sealed class EnemyController : MonoBehaviour
             return;
 
         TryStartDodge();
+    }
+    public bool TryRequestSuppressionFire(Vector3 aimPosition)
+    {
+        if (!CanUseSuppression || !CanReactToHit || !HasTarget || CanSeePlayer || IsDodging || !HasWeaponData || _weapon == null || WeaponIsReloading ||!_weapon.CanRequestFire)
+            return false;
+
+        //Attack State일때만 허용
+        if (_stateMachine == null || !ReferenceEquals(_stateMachine.CurrentState, AttackState))
+            return false;
+        
+        if (Time.time < _nextAttackTime)
+            return false;
+
+        // 실제 플레이어 위치가 아니라 전달받은 고정 조준점만 사용합니다.
+        Vector3 direction = aimPosition - transform.position;
+        direction.y = 0f;
+
+        if (direction.sqrMagnitude <= FacingDirectionSqrEpsilon)
+            return false;
+
+        float range = AttackHoldRange;
+
+        if (direction.sqrMagnitude > range * range)
+            return false;
+
+        Vector3 forward = transform.forward;
+        forward.y = 0f;
+
+        if (forward.sqrMagnitude <= FacingDirectionSqrEpsilon)
+            return false;
+
+        float facingDot = Vector3.Dot(forward.normalized,direction.normalized);
+
+        if (facingDot < _attackAimDotThreshold)
+            return false;
+
+        if (!_weapon.HasSafeMuzzle(sightBlockingMask))
+            return false;
+
+        if (!_weapon.TryFire(aimPosition))
+            return false;
+        
+        RecordSuccessfulAttack();
+        return true;
     }
 #if UNITY_EDITOR
     private void OnValidate()

@@ -18,3 +18,4 @@ MonoBehaviour:
   allowCover: 0
   allowDodge: 0
   allowLinearMove: 1
+  allowSuppression: 1

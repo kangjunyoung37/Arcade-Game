@@ -181,18 +181,29 @@ public sealed class EnemyWeapon : MonoBehaviour
         return true;
     }
 
-    public bool HasClearShot(Vector3 aimPosition, LayerMask blockingMask)
+    // 총구가 벽 안에 있거나,몸과 총구 사이에 벽이 끼어 있는지 검사
+    public bool HasSafeMuzzle(LayerMask blockingMask)
     {
-        if(!isActiveAndEnabled || muzzle == null)
+        if (!isActiveAndEnabled || muzzle == null)
             return false;
+
         Vector3 muzzlePosition = muzzle.position;
-        if(Physics.CheckSphere(muzzlePosition,MuzzleClearanceRadius, blockingMask,QueryTriggerInteraction.Ignore))
+
+        if (Physics.CheckSphere(muzzlePosition, MuzzleClearanceRadius, blockingMask,QueryTriggerInteraction.Ignore))
             return false;
+        
         Vector3 bodyPosition = transform.position;
         bodyPosition.y = muzzlePosition.y;
-        if(Physics.Linecast(bodyPosition,muzzlePosition,blockingMask,QueryTriggerInteraction.Ignore))
+
+        return !Physics.Linecast(bodyPosition, muzzlePosition, blockingMask, QueryTriggerInteraction.Ignore);
+    }
+
+    public bool HasClearShot(Vector3 aimPosition, LayerMask blockingMask)
+    {
+        if (!HasSafeMuzzle(blockingMask))
             return false;
-        return !Physics.Linecast(muzzlePosition,aimPosition,blockingMask,QueryTriggerInteraction.Ignore);
+            
+        return !Physics.Linecast(muzzle.position, aimPosition, blockingMask, QueryTriggerInteraction.Ignore);
     }
     public bool TryStartReload()
     {
