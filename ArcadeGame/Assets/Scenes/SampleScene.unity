@@ -16032,7 +16032,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 092fd96873d06f546a815f6cdc1ac875, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  behaviorProfile: {fileID: 11400000, guid: 620208920abb68145a9e2eeb25561062, type: 2}
+  behaviorProfile: {fileID: 11400000, guid: 987456fac7c3e6b45a91ebc214f50101, type: 2}
   minIdleDuration: 1
   maxIdleDuration: 3
   detectionInterval: 0.15

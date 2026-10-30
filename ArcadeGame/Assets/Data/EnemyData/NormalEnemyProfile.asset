@@ -19,3 +19,6 @@ MonoBehaviour:
   allowDodge: 0
   allowLinearMove: 1
   allowSuppression: 1
+  alertReactionDelay: 0.4
+  minVisualReactionDelay: 0.4
+  maxVisualReactionDelay: 0.7

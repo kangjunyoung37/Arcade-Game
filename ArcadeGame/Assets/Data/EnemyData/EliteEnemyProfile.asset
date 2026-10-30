@@ -17,3 +17,8 @@ MonoBehaviour:
   allowRetreat: 1
   allowCover: 1
   allowDodge: 1
+  allowLinearMove: 0
+  allowSuppression: 0
+  alertReactionDelay: 0.1
+  minVisualReactionDelay: 0.1
+  maxVisualReactionDelay: 0.25

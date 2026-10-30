@@ -138,6 +138,9 @@ public sealed class EnemyAttackState : IState
 
     private bool TryBeginSuppression()
     {
+        if (!_owner.HasCompletedVisualReaction)
+            return false;
+            
         if (!_owner.CanUseSuppression || !_owner.CanReactToHit || !_owner.HasUsableWeapon ||_owner.WeaponIsReloading ||!_hasAimSnapshot)
             return false;
         

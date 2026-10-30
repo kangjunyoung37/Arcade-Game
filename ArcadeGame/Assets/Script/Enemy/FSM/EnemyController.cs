@@ -170,6 +170,7 @@ public sealed class EnemyController : MonoBehaviour
     private bool _pendingDodgeHit;
     private float _pendingDodgeHitTime = float.NegativeInfinity;
     private float _nextAutoDodgeDecisionTime;
+    private float _visualAttackReadyTime = float.PositiveInfinity;
     public float SearchMoveTimeout => searchMoveTimeout;
     public float SearchLookDuration => searchLookDuration;
     public float SearchTurnSpeed => searchTurnSpeed;
@@ -193,7 +194,7 @@ public sealed class EnemyController : MonoBehaviour
     public float CoverFastMoveSpeed => Mathf.Max(MinimumCoverMoveSpeed, Mathf.Max(coverMoveSpeed, coverFastMoveSpeed));
     public float CoverFastMoveExitDistance => Mathf.Max(MinimumFastMoveDistanceGap, coverFastMoveExitDistance);
     public float CoverFastMoveEnterDistance => Mathf.Max(CoverFastMoveExitDistance + MinimumFastMoveDistanceGap, coverFastMoveEnterDistance);
-    public float AlertReactionTime => alertReactionTime;
+    public float AlertReactionTime => behaviorProfile != null ? behaviorProfile.AlertReactionDelay : Mathf.Max(0f, alertReactionTime);
     public float AlertMemoryDuration => alertMemoryDuration;
     public float DodgeDuration => Mathf.Max(0.1f, dodgeDuration);
     public float MinIdleDuration => minIdleDuration;
@@ -220,6 +221,7 @@ public sealed class EnemyController : MonoBehaviour
     public bool CanUseDodge =>behaviorProfile == null || behaviorProfile.AllowDodge;
     public bool CanUseLinearMove => behaviorProfile != null && behaviorProfile.AllowLinearMove;
     public bool CanUseSuppression => behaviorProfile != null && behaviorProfile.AllowSuppression;
+    public bool HasCompletedVisualReaction => Time.time >= _visualAttackReadyTime;
     public Vector3 LastKnownAimPosition => LastKnownPlayerPosition + Vector3.up * targetAimHeight;
     
     public int ShotsPerPeek => Mathf.Max(1, shotsPerPeek);
@@ -370,6 +372,8 @@ public sealed class EnemyController : MonoBehaviour
         PlayerNoise.Emitted += HandlePlayerNoise;
         _remainingPerceptionTime = 0f;
         _timeWithoutSight = 0f;
+        CanSeePlayer = false;
+        _visualAttackReadyTime = float.PositiveInfinity;
         //최초 활성화때는 Start가 초기 상태 시작
         //재활성화시 Idle 에서 시작
         if(_hasStarted && _stateMachine != null && _stateMachine.CurrentState == null)
@@ -386,9 +390,10 @@ public sealed class EnemyController : MonoBehaviour
         PlayerNoise.Emitted -= HandlePlayerNoise;
         PauseAttackCycle();
         _stateMachine?.Stop();
-    
+        
         _hasPendingNoise = false;
         CanSeePlayer = false;
+        _visualAttackReadyTime = float.PositiveInfinity;
         _lastHeardFootstepTime = float.NegativeInfinity;
         _pendingDodgeHit = false;
         _pendingDodgeHitTime = float.NegativeInfinity;      
@@ -659,6 +664,7 @@ public sealed class EnemyController : MonoBehaviour
         {
             _hasPendingNoise = false;
             CanSeePlayer = false;
+            _visualAttackReadyTime = float.PositiveInfinity;
             return;
         }
         _remainingPerceptionTime -= deltaTime;
@@ -667,8 +673,13 @@ public sealed class EnemyController : MonoBehaviour
             return;
         }
         _remainingPerceptionTime = detectionInterval;
+        bool previouslyVisible = CanSeePlayer;
         CanSeePlayer = CanDetectPlayer();
-
+        if (CanSeePlayer && !previouslyVisible)
+        {
+            float delay = behaviorProfile != null ? behaviorProfile.SampleVisualReactionDelay() : 0f;
+            _visualAttackReadyTime = Time.time + delay;
+        }
         bool perceivedSomething  = false;
         if (CanSeePlayer)
         {
@@ -787,6 +798,10 @@ public sealed class EnemyController : MonoBehaviour
     public bool TryRequestAttack()
     {
         if(IsDodging)
+            return false;
+
+        // 발견 후 반응 시간이 지나지 않았으면 아직 발사 X
+        if (!HasCompletedVisualReaction)
             return false;
 
         if(Time.time < _nextAttackTime)
