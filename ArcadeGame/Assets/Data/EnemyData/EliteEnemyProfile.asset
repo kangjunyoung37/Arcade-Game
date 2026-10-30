@@ -22,3 +22,5 @@ MonoBehaviour:
   alertReactionDelay: 0.1
   minVisualReactionDelay: 0.1
   maxVisualReactionDelay: 0.25
+  additionalSearchPoints: 3
+  searchRadius: 5

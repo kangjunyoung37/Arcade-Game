@@ -16061,6 +16061,8 @@ MonoBehaviour:
   searchTurnSpeed: 90
   searchStoppingDistance: 0.5
   searchChaseRetryDelay: 1
+  searchLookHalfAngle: 60
+  searchLookPauseDuration: 0.3
   reloadWhenTargetnotVisible: 1
   reloadAfterLostSightDelay: 2
   coverMoveSpeed: 3.5

@@ -10,6 +10,11 @@ public sealed class EnemyController : MonoBehaviour
     private const float MinimumCoverDecisionInterval = 0.1f;
     private const float MinimumCoverMoveSpeed = 0.1f;
     private const float MinimumFastMoveDistanceGap = 0.5f;
+    private const float SearchSampleRadius = 0.5f;
+    private const float MinimumSearchTravelDistance = 2f;
+    private const float MinimumSearchStoppingDistance = 0.05f;    
+    private const int SearchCandidateAttempts = 4;
+
     [Header("Behavior Profile")]
     [SerializeField] private EnemyBehaviorProfile behaviorProfile;
     
@@ -72,6 +77,9 @@ public sealed class EnemyController : MonoBehaviour
     [SerializeField, Min(0.1f)] private float searchTurnSpeed = 90f;
     [SerializeField, Min(0.1f)] private float searchStoppingDistance = 0.5f;
     [SerializeField, Min(0.1f)] private float searchChaseRetryDelay = 1f;
+    [SerializeField, Range(0f, 90f)] private float searchLookHalfAngle = 60f;
+    [SerializeField, Min(0f)] private float searchLookPauseDuration = 0.3f;
+
 
     [Header("Reload Decision")]
     [SerializeField] private bool reloadWhenTargetnotVisible = true;
@@ -171,6 +179,7 @@ public sealed class EnemyController : MonoBehaviour
     private float _pendingDodgeHitTime = float.NegativeInfinity;
     private float _nextAutoDodgeDecisionTime;
     private float _visualAttackReadyTime = float.PositiveInfinity;
+    private NavMeshPath _searchPath;
     public float SearchMoveTimeout => searchMoveTimeout;
     public float SearchLookDuration => searchLookDuration;
     public float SearchTurnSpeed => searchTurnSpeed;
@@ -204,6 +213,9 @@ public sealed class EnemyController : MonoBehaviour
     public float SuppressionChance => Mathf.Clamp01(suppressionChance);
     public float SuppressionDuration => Mathf.Max(0.1f, suppressionDuration);
     public float SuppressionCooldown => Mathf.Max(0.1f, suppressionCooldown);
+    public float AreaSearchRadius => behaviorProfile != null ? behaviorProfile.SearchRadius : 0f;
+    public float SearchLookHalfAngle => Mathf.Clamp(searchLookHalfAngle, 0f, 90f);
+    public float SearchLookPauseDuration => Mathf.Max(0f, searchLookPauseDuration);
     public bool HasTarget => target != null && target.gameObject.activeInHierarchy;
     public bool HasUsableWeapon => _weapon != null && _weapon.IsReadyForAI;
     public bool WeaponNeedsReload => HasUsableWeapon && _weapon.NeedsReload;
@@ -227,6 +239,7 @@ public sealed class EnemyController : MonoBehaviour
     public int ShotsPerPeek => Mathf.Max(1, shotsPerPeek);
     public int MaxPeekCycles => Mathf.Max(1, maxPeekCycles);
     public int MaxSuppressionShots => Mathf.Max(1, maxSuppressionShots);
+    public int AdditionalSearchPoints => behaviorProfile != null ? behaviorProfile.AdditionalSearchPoints : 0;
 
     public EnemyCombatPressure CombatPressure { get; private set; }
     public EnemyStrafeMovement StrafeMovement {get; private set;}
@@ -309,6 +322,7 @@ public sealed class EnemyController : MonoBehaviour
     private void Awake()
     {
         _agent = GetComponent<NavMeshAgent>();
+        _searchPath = new NavMeshPath();
         _stateMachine = new StateMachine();
 
         _viewDotThreshold = Mathf.Cos(viewAngle * 0.5f * Mathf.Deg2Rad);
@@ -1097,6 +1111,71 @@ public sealed class EnemyController : MonoBehaviour
         
         RecordSuccessfulAttack();
         return true;
+    }
+
+    public bool TryMoveToAreaSearchPoint(Vector3 searchCenter)
+    {
+        if (!CanNaviagate || _searchPath == null)
+            return false;
+
+        float radius = AreaSearchRadius;
+
+        if (radius <= 0f)
+            return false;
+
+        Vector3 origin = _agent.nextPosition - Vector3.up * _agent.baseOffset;
+
+        float stopDistance = Mathf.Max( MinimumSearchStoppingDistance, SearchStoppingDistance);
+        float minimumTravel = Mathf.Max( MinimumSearchTravelDistance, stopDistance * 2f);
+        float minimumTravelSquared = minimumTravel * minimumTravel;
+        float radiusSquared = radius * radius;
+
+        NavMeshQueryFilter filter = new NavMeshQueryFilter
+        {
+            agentTypeID = _agent.agentTypeID,
+            areaMask = _agent.areaMask
+        };
+
+        for (int i = 0; i < SearchCandidateAttempts; i++)
+        {
+            Vector2 offset = UnityEngine.Random.insideUnitCircle * radius;
+
+            Vector3 candidate = searchCenter + new Vector3(offset.x, 0f, offset.y);
+            candidate.y = origin.y;
+
+            if (!NavMesh.SamplePosition( candidate, out NavMeshHit hit, SearchSampleRadius, filter))
+                continue;
+            
+            Vector3 fromCenter = hit.position - searchCenter;
+            fromCenter.y = 0f;
+
+            if (fromCenter.sqrMagnitude > radiusSquared)
+                continue;
+
+            // 현재 자리 바로 옆을 새 수색 지점으로 선택하지 않습니다.
+            Vector3 travel = hit.position - origin;
+            travel.y = 0f;
+
+            if (travel.sqrMagnitude < minimumTravelSquared)
+                continue;
+
+            if (!_agent.CalculatePath(hit.position, _searchPath))
+                continue;
+
+            // 부분 경로는 목적지까지 도달할 수 없으므로 제외합니다.
+            if (_searchPath.status != NavMeshPathStatus.PathComplete)
+                continue;
+
+            _agent.stoppingDistance = stopDistance;
+
+            if (!_agent.SetPath(_searchPath))
+                continue;
+
+            _agent.isStopped = false;
+            return true;
+        }
+
+        return false;
     }
 #if UNITY_EDITOR
     private void OnValidate()
