@@ -79,6 +79,7 @@ public sealed class EnemyController : MonoBehaviour
     [SerializeField, Min(0.1f)] private float searchChaseRetryDelay = 1f;
     [SerializeField, Range(0f, 90f)] private float searchLookHalfAngle = 60f;
     [SerializeField, Min(0f)] private float searchLookPauseDuration = 0.3f;
+    [SerializeField, Min(0f)] private float searchedPositionExclusionRadius = 2f;
 
 
     [Header("Reload Decision")]
@@ -1113,8 +1114,11 @@ public sealed class EnemyController : MonoBehaviour
         return true;
     }
 
-    public bool TryMoveToAreaSearchPoint(Vector3 searchCenter)
+    public bool TryMoveToAreaSearchPoint(Vector3 searchCenter, Vector3[] searchedPositions,int searchedPositionCount)
     {
+        if (searchedPositions == null ||  searchedPositionCount < 0 || searchedPositionCount > searchedPositions.Length)
+            return false;
+ 
         if (!CanNaviagate || _searchPath == null)
             return false;
 
@@ -1126,6 +1130,9 @@ public sealed class EnemyController : MonoBehaviour
         Vector3 origin = _agent.nextPosition - Vector3.up * _agent.baseOffset;
 
         float stopDistance = Mathf.Max( MinimumSearchStoppingDistance, SearchStoppingDistance);
+        float exclusionRadius = Mathf.Max( 0f, searchedPositionExclusionRadius);
+        if (exclusionRadius > 0f)
+            exclusionRadius += stopDistance;
         float minimumTravel = Mathf.Max( MinimumSearchTravelDistance, stopDistance * 2f);
         float minimumTravelSquared = minimumTravel * minimumTravel;
         float radiusSquared = radius * radius;
@@ -1159,6 +1166,9 @@ public sealed class EnemyController : MonoBehaviour
             if (travel.sqrMagnitude < minimumTravelSquared)
                 continue;
 
+            if (IsNearSearchedPosition( hit.position, searchedPositions, searchedPositionCount, exclusionRadius))
+                continue;
+   
             if (!_agent.CalculatePath(hit.position, _searchPath))
                 continue;
 
@@ -1177,6 +1187,23 @@ public sealed class EnemyController : MonoBehaviour
 
         return false;
     }
+    private bool IsNearSearchedPosition( Vector3 candidate, Vector3[] searchedPositions, int searchedPositionCount, float exclusionRadius)
+    {
+        if (exclusionRadius <= 0f)
+            return false;
+
+        float radiusSquared = exclusionRadius * exclusionRadius;
+
+        for (int i = 0; i < searchedPositionCount; i++)
+        {
+            Vector3 difference = candidate - searchedPositions[i];
+            difference.y = 0f;
+            if (difference.sqrMagnitude <= radiusSquared)
+                return true;
+        }
+        return false;
+    }
+
 #if UNITY_EDITOR
     private void OnValidate()
     {

@@ -9,7 +9,9 @@ public sealed class EnemySearchState : IState
         MovingToSearchPoint,
         LookingAround
     }
+    private const int SearchHistoryCapacity = 8;
     private readonly EnemyController _owner;
+    private readonly Vector3[] _searchedPositions = new Vector3[SearchHistoryCapacity];
     private SearchPhase _phase;
 
     private float _remainingMoveTime;
@@ -22,6 +24,7 @@ public sealed class EnemySearchState : IState
     private float _remainingLookPause;
     private bool _previousAgentUpdateRotation;
     private int _remainingSearchPoints;
+    private int _searchedPositionCount;
     private Vector3 _searchCenter;
     private Quaternion _lookBaseRotation;
     public EnemySearchState(EnemyController owner)
@@ -39,6 +42,7 @@ public sealed class EnemySearchState : IState
         _remainingMoveTime = _owner.SearchMoveTimeout;
         _remainingLookTime = _owner.SearchLookDuration;
         _remainingChaseRetryTime = _owner.SearchChaseRetryDelay;
+        _searchedPositionCount = 0;
 
         _phase = SearchPhase.MovingToSearchPoint;
 
@@ -134,6 +138,7 @@ public sealed class EnemySearchState : IState
 
         if (_remainingLookTime <= 0f)
         {
+            RememberSearchedPosition();
             if (TryBeginNextSearchPoint())
                 return;
 
@@ -171,29 +176,34 @@ public sealed class EnemySearchState : IState
             _targetLookAngle = -_targetLookAngle;
         }
     }
+    private void RememberSearchedPosition()
+    {
+        if (_searchedPositionCount >= _searchedPositions.Length)
+            return;
+
+        // 요청했던 목적지가 아니라 실제로 둘러본 위치를 기록합니다.
+        _searchedPositions[_searchedPositionCount] = _owner.transform.position;
+
+        _searchedPositionCount++;
+    }
     private bool TryBeginNextSearchPoint()
     {
-        if (_remainingSearchPoints <= 0)
-            return false;
+       if (_remainingSearchPoints <= 0)
+        return false;
 
         if (!_owner.CanNaviagate)
             return false;
 
+        if (_searchedPositionCount >= _searchedPositions.Length)
+            return false;
+
+        bool accepted = _owner.TryMoveToAreaSearchPoint( _searchCenter, _searchedPositions,_searchedPositionCount);
+
+        if (!accepted)
+            return false;
+
         _remainingSearchPoints--;
 
-    bool accepted = _owner.TryMoveToAreaSearchPoint(_searchCenter);
-    #if UNITY_EDITOR
-    Debug.Log(
-        $"[추가 수색] Enemy={_owner.name}, " +
-        $"Accepted={accepted}, " +
-        $"Remaining={_remainingSearchPoints}, " +
-        $"Center={_searchCenter}",
-        _owner);
-    #endif
-    if (!accepted)
-        return false;
-        
-        // 둘러보기에서 껐던 자동 회전을 다시 켭니다.
         _owner.AgentUpdatesRotation = true;
 
         _phase = SearchPhase.MovingToSearchPoint;
