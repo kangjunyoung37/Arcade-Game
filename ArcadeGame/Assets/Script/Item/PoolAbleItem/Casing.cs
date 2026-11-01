@@ -1,4 +1,3 @@
-using System.Collections;
 using UnityEngine;
 
 
@@ -9,6 +8,8 @@ public class Casing : PoolAble
     public float maxForce = 5f;
     public float spinForce = 10f;
     public float lifeTime = 3f;
+    private float _remainingLifetime;
+    private bool _isEjected;
 
     private Rigidbody _rb;
 
@@ -28,13 +29,24 @@ public class Casing : PoolAble
         var randomSpin = new Vector3(Random.Range(-1f, 1f), Random.Range(-1f, 1f), Random.Range(-1f, 1f)) * spinForce;
        
         _rb.AddTorque(randomSpin, ForceMode.Impulse);
-        StartCoroutine(DeactivateAfterTime());
+        _remainingLifetime = Mathf.Max(0f, lifeTime);
+        _isEjected = true;
     }
 
-    private IEnumerator DeactivateAfterTime()
+    private void Update()
     {
-        yield return new WaitForSeconds(lifeTime);
-        ReleaseObject();
+        if(!_isEjected) return;
+        _remainingLifetime -= Time.deltaTime;
+        if(_remainingLifetime > 0f) return;
+        _isEjected = false;
+        if(Pool != null) ReleaseObject();
+        else gameObject.SetActive(false);
+    }
+
+    private void OnDisable()
+    {
+        _isEjected = false;
+        _remainingLifetime = 0f;
     }
 
 }

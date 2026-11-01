@@ -34,6 +34,7 @@ public sealed class StateMachine
 
         CurrentState?.Exit();
 
+
         PreviousState = CurrentState;
         CurrentState = nextState;
 

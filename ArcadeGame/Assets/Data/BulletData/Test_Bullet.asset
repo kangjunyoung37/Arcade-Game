@@ -13,6 +13,10 @@ MonoBehaviour:
   m_Name: Test_Bullet
   m_EditorClassIdentifier: 
   bulletName: 
+  caliber: {fileID: 0}
   damage: 5
-  speed: 0
-  lifetime: 0
+  penetrationLevel: 0
+  projectilesPerRound: 1
+  pelletSpreadHalfAngle: 0
+  speed: 60
+  lifetime: 5
