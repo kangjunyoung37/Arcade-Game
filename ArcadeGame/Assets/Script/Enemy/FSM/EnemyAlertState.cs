@@ -19,30 +19,31 @@ public sealed class EnemyAlertState : IState
 
     public void Tick(float deltaTime)
     {
+        if(deltaTime <= 0f)
+            return;
+        if (!_owner.HasTarget)
+        {
+            _owner.ChangeState(_owner.IdleState);
+            return;
+        }
+
         _owner.FaceLastKnownPosition(deltaTime);
         _remainingReactionTime -= deltaTime;
 
         if(_remainingReactionTime > 0f)
+            return;
+        float timeSinceStimulus = Time.time - _owner.LastStimulusTime;
+
+        bool hasRecentStimulus = timeSinceStimulus < _owner.AlertMemoryDuration;
+        
+        if (_owner.CanSeePlayer || hasRecentStimulus)
         {
+            IState nextState = _owner.ChaseState ?? _owner.SearchState ?? _owner.IdleState;
+            _owner.ChangeState(nextState);
+
             return;
         }
-        if (_owner.CanSeePlayer)
-        {
-            IState chaseState_ = _owner.ChaseState;
-            if(chaseState_ != null)
-            {
-                _owner.ChangeState(chaseState_);
-            }
-            //Chase 구현
-            return;
-        }
-        float timeSicneStimulus = Time.time - _owner.LastStimulusTime;
-        if(timeSicneStimulus < _owner.AlertMemoryDuration)
-        {
-            return;
-        }
-        IState nextState = _owner.SearchState ?? _owner.IdleState;
-        _owner.ChangeState(nextState);
+        _owner.ChangeState(_owner.SearchState ?? _owner.IdleState);
     }
     public void Exit()
     {
