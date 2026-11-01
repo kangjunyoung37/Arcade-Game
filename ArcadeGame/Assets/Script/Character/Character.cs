@@ -224,7 +224,7 @@ public class Character : MonoBehaviour
     //Bullet Fire
     private void Fire()
     {
-        PlayerNoise.Emit( this,bulletSpawnPoint.position,gunshotNoiseRadius);
+        PlayerNoise.Emit( this,bulletSpawnPoint.position,gunshotNoiseRadius,PlayerNoiseType.Gunshot);
         crosshair.AddSpread(CurrentSpread);
         _impulseSource.GenerateImpulse();
         GameObject casing = ObjectPoolManager.instance.GetGo("Casing");
@@ -346,7 +346,7 @@ public class Character : MonoBehaviour
         }
     }
 
-    private void UpdateFootstepNoise()
+private void UpdateFootstepNoise()
 {
     Vector3 currentPosition = transform.position;
     Vector3 displacement = currentPosition - _lastFootstepPosition;
@@ -373,7 +373,7 @@ public class Character : MonoBehaviour
         ? runNoiseRadius
         : walkNoiseRadius;
 
-    PlayerNoise.Emit(this, currentPosition, radius);
+    PlayerNoise.Emit(this, currentPosition, radius, PlayerNoiseType.Footstep);
 }
     private void HandleDeath()
     {

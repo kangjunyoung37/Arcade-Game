@@ -1,12 +1,23 @@
 using System;
-using System.Collections.Generic;
-using Unity.Mathematics;
+using UnityEditor.Rendering;
 using UnityEngine;
 using UnityEngine.AI;
 
 [RequireComponent(typeof(NavMeshAgent))]
 public sealed class EnemyController : MonoBehaviour
 {
+    private const float MinimumCoverHoldDuration = 0.1f;
+    private const float MinimumCoverDecisionInterval = 0.1f;
+    private const float MinimumCoverMoveSpeed = 0.1f;
+    private const float MinimumFastMoveDistanceGap = 0.5f;
+    private const float SearchSampleRadius = 0.5f;
+    private const float MinimumSearchTravelDistance = 2f;
+    private const float MinimumSearchStoppingDistance = 0.05f;    
+    private const int SearchCandidateAttempts = 4;
+
+    [Header("Behavior Profile")]
+    [SerializeField] private EnemyBehaviorProfile behaviorProfile;
+    
     [Header("Idle")]
     [SerializeField, Min(0f)]
     private float minIdleDuration = 1f;
@@ -40,11 +51,6 @@ public sealed class EnemyController : MonoBehaviour
     [SerializeField, Range(0f, 360f)]
     private float viewAngle = 120f;
 
-    public float MinIdleDuration => minIdleDuration;
-    public float MaxIdleDuration => maxIdleDuration;
-    public float DetectionInterval => detectionInterval;
-    public float PatrolStoppingDistance => patrolStoppingDistance;
-
     [Header("Patrol")]
     [SerializeField] private EnemyPatrolRoute patrolRoute;
     [SerializeField, Min(0.05f)] private float patrolStoppingDistance = 0.5f;
@@ -71,6 +77,10 @@ public sealed class EnemyController : MonoBehaviour
     [SerializeField, Min(0.1f)] private float searchTurnSpeed = 90f;
     [SerializeField, Min(0.1f)] private float searchStoppingDistance = 0.5f;
     [SerializeField, Min(0.1f)] private float searchChaseRetryDelay = 1f;
+    [SerializeField, Range(0f, 90f)] private float searchLookHalfAngle = 60f;
+    [SerializeField, Min(0f)] private float searchLookPauseDuration = 0.3f;
+    [SerializeField, Min(0f)] private float searchedPositionExclusionRadius = 2f;
+
 
     [Header("Reload Decision")]
     [SerializeField] private bool reloadWhenTargetnotVisible = true;
@@ -82,6 +92,70 @@ public sealed class EnemyController : MonoBehaviour
     [SerializeField, Min(0.1f)] private float coverMoveTimeOut = 8f;
     [SerializeField, Min(0.1f)] private float coverHoldDuration = 3f;
     [SerializeField, Min(0.1f)] private float coverCheckInterval = 0.25f;
+
+    [Header("Tactical Reload")]
+    [SerializeField] private bool seekCoverWhenAmmoLow = true;
+
+    [SerializeField, Range(0f, 1f)] private float lowAmmoRatio = 0.3f;
+    [SerializeField, Min(MinimumCoverDecisionInterval)] private float coverRetryInterval = 2f;
+    [SerializeField, Min(0.1f)] private float coverReloadTimeoutMargin = 2f;
+    [SerializeField, Min(0f)] private float postReloadHoldDuration = 0.35f;
+
+    [Header("Cover Peeking")]
+    [SerializeField, Min(1)] private int maxPeekCycles = 2;
+    [SerializeField, Min(0.1f)] private float peekMoveTimeout = 2f;
+    [SerializeField, Min(0.1f)] private float peekExposureDuration = 1.5f;
+    [SerializeField, Min(1)] private int shotsPerPeek = 3;
+    [SerializeField, Min(0.1f)] private float peekMemoryDuration = 8f;
+    [Tooltip("양쪽 모두 피킹 가능할 때 이전과 반대쪽을 선호할 확률")]
+    [SerializeField, Range(0f, 1f)] private float peekSideSwithChance = 0.7f;
+    [Tooltip("기존 엄폐 대기 시간에 더하거나 빼는 최대 시간")]
+    [SerializeField, Min(0f)] private float coverHoldJitter = 0.8f;
+    
+    [Header("Close Footstep Reation")]
+    [SerializeField, Min(0.1f)] private float closeFootstepDistance = 4f;
+    [SerializeField, Min(0.1f)] private float closeFootstepMemoryDuration = 1.5f;
+    
+    [Header("Cover Fast Movement")]
+    [SerializeField, Min(MinimumCoverMoveSpeed)] private float coverFastMoveSpeed = 8f;
+    [SerializeField, Min(MinimumFastMoveDistanceGap)] private float coverFastMoveEnterDistance = 5f;
+    [SerializeField, Min(MinimumFastMoveDistanceGap)] private float coverFastMoveExitDistance = 2f;
+    
+    [Header("Hit Reaction")]
+    [SerializeField] private HealthSystem healthSystem;
+    [SerializeField, Min(0.1f)] private float hitPeekRecoveryDuration = 2f;
+    [SerializeField] private bool seekCoverWhenPressureHigh = true;
+
+    [Header("Dodge")]
+    [SerializeField, Min(0.1f)] private float dodgeDuration = 0.45f;
+
+    [SerializeField, Min(0.1f)] private float dodgeCooldown = 3f;
+
+    [SerializeField, Min(0.1f)] private float dodgeRetryDelay = 0.5f;
+
+    [SerializeField] private bool autoDodgeOnHit = true;
+
+    [Tooltip("거리 기반 후퇴가 필요한 상황에서 피격 시 구르기 확률")]
+    [SerializeField, Range(0f, 1f)] private float closeHitDodgeChance = 0.65f;
+
+    [Tooltip("근접 상황은 아니지만 고위험 상태에서 피격 시 구르기 확률")]
+    [SerializeField, Range(0f, 1f)] private float highPressureDodgeChance = 0.35f;
+
+    [Tooltip("확률 판단 사이의 최소 간격")]
+    [SerializeField, Min(0.1f)] private float autoDodgeDecisionInterval = 1f;
+
+    [Tooltip("처리되지 않은 피격 예약의 유효 시간")]
+    [SerializeField, Min(0.1f)] private float dodgeHitMemoryDuration = 0.35f;
+    
+    [Header("Suppression")]
+    [SerializeField, Range(0f, 1f)] private float suppressionChance = 0.5f;
+    [SerializeField, Min(0.1f)] private float suppressionDuration = 1.2f;
+    [SerializeField, Min(1)] private int maxSuppressionShots = 3;
+    [SerializeField, Min(0.1f)]private float suppressionCooldown = 4f;
+
+    public float HitPeekRecoveryDuration => Mathf.Max(0.1f, hitPeekRecoveryDuration);
+
+    public bool CanReactToHit => isActiveAndEnabled && healthSystem != null && healthSystem.isActiveAndEnabled && healthSystem.IsAlive;
 
     private float _timeWithoutSight;
     private float _viewDotThreshold;
@@ -96,39 +170,86 @@ public sealed class EnemyController : MonoBehaviour
     private Vector3 _pendingNoisePosition;
     private EnemyWeapon _weapon;
     private bool _hasStarted;
-
+    private float _nextCoverAttempTime;
+    private int _shotsInAttackCycle;
+    private float _nextAttackTime;
+    private Vector3 _lastheardFootstepPosition;
+    private float _lastHeardFootstepTime = float.NegativeInfinity;
+    private float _nextDodgeAttemptTime;
+    private bool _pendingDodgeHit;
+    private float _pendingDodgeHitTime = float.NegativeInfinity;
+    private float _nextAutoDodgeDecisionTime;
+    private float _visualAttackReadyTime = float.PositiveInfinity;
+    private NavMeshPath _searchPath;
     public float SearchMoveTimeout => searchMoveTimeout;
     public float SearchLookDuration => searchLookDuration;
     public float SearchTurnSpeed => searchTurnSpeed;
     public float SearchStoppingDistance => searchStoppingDistance;
     public float SearchChaseRetryDelay => searchChaseRetryDelay;
-
     public float ChasePathUpdateInterval => chasePathUpdateInterval;
     public float ChaseMemoryDuration => chaseMemoryDuration;
-
-    public float ChaseStoppingDistance => CanSeePlayer ? attackRange * AttackApproachRatio : investigationStoppingDistance;
-
-    public bool HasTarget => target != null && target.gameObject.activeInHierarchy;
-    
-    public bool CanNaviagate => _agent != null && _agent.isActiveAndEnabled && _agent.isOnNavMesh;
-    public bool IsPathPendinng => CanNaviagate && _agent.pathPending;
+    public float ChaseStoppingDistance => CanSeePlayer ? attackRange * AttackApproachRatio : investigationStoppingDistance;    
+    public float CoverReloadWaitLimit => HasUsableWeapon ? _weapon.EstimatedReloadWait + Mathf.Max(0.1f, coverReloadTimeoutMargin) : 0f;
+    public float PostReloadHoldDuration => Mathf.Max(0f, postReloadHoldDuration);
     public float CoverMoveSpeed => coverMoveSpeed;
     public float CoverAcceleration => coverAcceleration;
     public float CoverMoveTimeout => coverMoveTimeOut;
     public float CoverHoldDuration => coverHoldDuration;
     public float CoverCheckInterval => coverCheckInterval;
+    public float AttackHoldRange => Mathf.Max(0f, attackRange + attackRangeBuffer);
+    public float PeekmoveTimeout => Mathf.Max(0.1f, peekMoveTimeout);
+    public float PeekExposureDuration => Mathf.Max(0.1f, peekExposureDuration);
+    public float PeekMemoryDuration => Mathf.Max(0.1f, peekMemoryDuration);
+    public float PeekSideSwithChance => Mathf.Clamp01(peekSideSwithChance);
+    public float CoverFastMoveSpeed => Mathf.Max(MinimumCoverMoveSpeed, Mathf.Max(coverMoveSpeed, coverFastMoveSpeed));
+    public float CoverFastMoveExitDistance => Mathf.Max(MinimumFastMoveDistanceGap, coverFastMoveExitDistance);
+    public float CoverFastMoveEnterDistance => Mathf.Max(CoverFastMoveExitDistance + MinimumFastMoveDistanceGap, coverFastMoveEnterDistance);
+    public float AlertReactionTime => behaviorProfile != null ? behaviorProfile.AlertReactionDelay : Mathf.Max(0f, alertReactionTime);
+    public float AlertMemoryDuration => alertMemoryDuration;
+    public float DodgeDuration => Mathf.Max(0.1f, dodgeDuration);
+    public float MinIdleDuration => minIdleDuration;
+    public float MaxIdleDuration => maxIdleDuration;
+    public float DetectionInterval => detectionInterval;
+    public float PatrolStoppingDistance => patrolStoppingDistance;
+    public float SuppressionChance => Mathf.Clamp01(suppressionChance);
+    public float SuppressionDuration => Mathf.Max(0.1f, suppressionDuration);
+    public float SuppressionCooldown => Mathf.Max(0.1f, suppressionCooldown);
+    public float AreaSearchRadius => behaviorProfile != null ? behaviorProfile.SearchRadius : 0f;
+    public float SearchLookHalfAngle => Mathf.Clamp(searchLookHalfAngle, 0f, 90f);
+    public float SearchLookPauseDuration => Mathf.Max(0f, searchLookPauseDuration);
+    public bool HasTarget => target != null && target.gameObject.activeInHierarchy;
+    public bool HasUsableWeapon => _weapon != null && _weapon.IsReadyForAI;
+    public bool WeaponNeedsReload => HasUsableWeapon && _weapon.NeedsReload;
+    public bool WeaponIsReloading => HasUsableWeapon && _weapon.IsReloading;
+    public bool CanNaviagate => _agent != null && _agent.isActiveAndEnabled && _agent.isOnNavMesh;
+    public bool IsPathPendinng => CanNaviagate && _agent.pathPending;
+    public bool HasLoadedAmmunition => HasUsableWeapon && _weapon.LoadedRounds > 0;
+    private bool ShouldDeferCoverForRetreat => CombatDecision != null && CombatDecision.isActiveAndEnabled && CombatDecision.ShouldPrioritizeRetreat();
+    private bool ShouldSeekCoverForPressure => seekCoverWhenPressureHigh && CanReactToHit && CombatPressure != null && CombatPressure.isActiveAndEnabled && CombatPressure.IsHighPressure;
+    public bool IsDodging => DodgeState != null && _stateMachine != null && ReferenceEquals(_stateMachine.CurrentState, DodgeState);
+    public bool CanUseStrafe => behaviorProfile == null || behaviorProfile.AllowStrafe;
+    public bool CanUseApproach => behaviorProfile == null || behaviorProfile.AllowApproach;
+    public bool CanUseRetreat => behaviorProfile == null || behaviorProfile.AllowRetreat;
+    public bool CanUseCover => behaviorProfile == null || behaviorProfile.AllowCover;
+    public bool CanUseDodge =>behaviorProfile == null || behaviorProfile.AllowDodge;
+    public bool CanUseLinearMove => behaviorProfile != null && behaviorProfile.AllowLinearMove;
+    public bool CanUseSuppression => behaviorProfile != null && behaviorProfile.AllowSuppression;
+    public bool HasCompletedVisualReaction => Time.time >= _visualAttackReadyTime;
+    public Vector3 LastKnownAimPosition => LastKnownPlayerPosition + Vector3.up * targetAimHeight;
     
+    public int ShotsPerPeek => Mathf.Max(1, shotsPerPeek);
+    public int MaxPeekCycles => Mathf.Max(1, maxPeekCycles);
+    public int MaxSuppressionShots => Mathf.Max(1, maxSuppressionShots);
+    public int AdditionalSearchPoints => behaviorProfile != null ? behaviorProfile.AdditionalSearchPoints : 0;
+
+    public EnemyCombatPressure CombatPressure { get; private set; }
     public EnemyStrafeMovement StrafeMovement {get; private set;}
-
     public IState AttackState { get; private set; }
-
-
     public bool CanSeePlayer { get; private set; }
     public Vector3 LastKnownPlayerPosition { get; private set; }
     public float LastStimulusTime { get; private set; }
 
-    public float AlertReactionTime => alertReactionTime;
-    public float AlertMemoryDuration => alertMemoryDuration;
+
     public IState ChaseState { get; private set; }
     public IState SearchState { get; private set; }
 
@@ -136,6 +257,7 @@ public sealed class EnemyController : MonoBehaviour
     public IState AlertState { get; private set; }
 
     public EnemyIdleState IdleState { get; private set; }
+    public EnemyDodgeState DodgeState { get; private set; }
 
     private WeaponData EquippedWeaponData => _weapon != null ? _weapon.Data : null;
 
@@ -177,6 +299,21 @@ public sealed class EnemyController : MonoBehaviour
             }
         }
     }
+    public bool ShouldReloadInCover
+    {
+        get
+        {
+            if(!HasUsableWeapon)
+                return false;
+            if(_weapon.IsReloading)
+                return true;
+            int capacity = _weapon.LoadedCapacity;
+            if(capacity <= 0 || !_weapon.NeedsReload)
+                return false;
+            float ratio = _weapon.LoadedRounds / (float)capacity;
+            return ratio <= Mathf.Clamp01(lowAmmoRatio);
+        }
+    }
 
     public EnemyCombatDecision CombatDecision {get; private set;}
     public EnemyCoverSensor CoverSensor {get; private set;}
@@ -186,6 +323,7 @@ public sealed class EnemyController : MonoBehaviour
     private void Awake()
     {
         _agent = GetComponent<NavMeshAgent>();
+        _searchPath = new NavMeshPath();
         _stateMachine = new StateMachine();
 
         _viewDotThreshold = Mathf.Cos(viewAngle * 0.5f * Mathf.Deg2Rad);
@@ -205,13 +343,18 @@ public sealed class EnemyController : MonoBehaviour
         CoverSensor = coverSensor;
 
         CoverState = new EnemyCoverState(this, _agent, CoverSensor);
-
+        if(healthSystem == null) TryGetComponent(out healthSystem);
+        TryGetComponent(out EnemyCombatPressure combatPressure);
+        CombatPressure = combatPressure;
+        TryGetComponent(out EnemyDodgeSensor dodgeSensor);
+        DodgeState = new EnemyDodgeState(this, _agent, dodgeSensor);
     }
 
     private void Start()
     {
         TryResolvePlayerTarget();
-        _stateMachine.Start(IdleState);
+        _hasStarted = true;
+
         if(_stateMachine.CurrentState == null)
             _stateMachine.Start(IdleState);
     }
@@ -220,7 +363,14 @@ public sealed class EnemyController : MonoBehaviour
     {
         float deltaTime = Time.deltaTime;
 
+        if (CombatPressure != null)
+            CombatPressure.TickPressure();
+
         UpdatePerception(deltaTime);
+        UpdateCoverDecision();
+
+        UpdateDodgeReaction(deltaTime);
+        
         _stateMachine.Tick(deltaTime);
         UpdateReloadDecision(deltaTime);
     }
@@ -231,9 +381,14 @@ public sealed class EnemyController : MonoBehaviour
     }
     private void OnEnable()
     {
+        if(healthSystem != null)
+            healthSystem.DamageReceived += HandleDamageReceived;
+
         PlayerNoise.Emitted += HandlePlayerNoise;
         _remainingPerceptionTime = 0f;
         _timeWithoutSight = 0f;
+        CanSeePlayer = false;
+        _visualAttackReadyTime = float.PositiveInfinity;
         //최초 활성화때는 Start가 초기 상태 시작
         //재활성화시 Idle 에서 시작
         if(_hasStarted && _stateMachine != null && _stateMachine.CurrentState == null)
@@ -244,16 +399,27 @@ public sealed class EnemyController : MonoBehaviour
 
     private void OnDisable()
     {
+        if(healthSystem != null)
+            healthSystem.DamageReceived -= HandleDamageReceived;
+            
         PlayerNoise.Emitted -= HandlePlayerNoise;
-
+        PauseAttackCycle();
         _stateMachine?.Stop();
-
+        
         _hasPendingNoise = false;
         CanSeePlayer = false;
+        _visualAttackReadyTime = float.PositiveInfinity;
+        _lastHeardFootstepTime = float.NegativeInfinity;
+        _pendingDodgeHit = false;
+        _pendingDodgeHitTime = float.NegativeInfinity;      
     }
     
     public void ChangeState(IState nextState)
     {
+        if(!ReferenceEquals(nextState, AttackState) && !ReferenceEquals(nextState, CoverState))
+        {
+            PauseAttackCycle();
+        }
         _stateMachine.ChangeState(nextState);
     }
 
@@ -268,32 +434,68 @@ public sealed class EnemyController : MonoBehaviour
         _agent.ResetPath();
     }
 
- public bool CanDetectPlayer()
-{
-    if (!TryResolvePlayerTarget())
+    public bool CanDetectPlayer()
     {
-        return false;
+        if (!TryResolvePlayerTarget())
+        {
+            return false;
+        }
+
+        Vector3 toTarget = target.position - transform.position;
+
+        // 1. 거리 검사
+        if (toTarget.sqrMagnitude >
+            detectionRange * detectionRange)
+        {
+            return false;
+        }
+
+        // 2. 시야각 검사
+        if (!IsWithinViewAngle(toTarget))
+        {
+            return false;
+        }
+
+        // 3. 장애물 검사
+        return HasClearLineOfSight();
+    }
+    public bool TryGetRecentCloseFootstep(out Vector3 position)
+    {
+        position = default;
+        if(!HasTarget)
+            return false;
+        float age = Time.time - _lastHeardFootstepTime;
+        if(age > closeFootstepMemoryDuration)
+            return false;
+        Vector3 difference = _lastheardFootstepPosition - transform.position;
+
+        float distanceSquared = closeFootstepDistance * closeFootstepDistance;
+        if(difference.sqrMagnitude > distanceSquared)
+            return false;
+        position = _lastheardFootstepPosition;
+        return true;
     }
 
-    Vector3 toTarget = target.position - transform.position;
-
-    // 1. 거리 검사
-    if (toTarget.sqrMagnitude >
-        detectionRange * detectionRange)
+    public bool TryReactToCloseFootstepFromCover()
     {
-        return false;
+        if(_stateMachine == null || CoverState == null || !ReferenceEquals(_stateMachine.CurrentState, CoverState))
+            return false;
+        if(!TryGetRecentCloseFootstep(out Vector3 heardPosition))
+            return false;
+        IState nextState;
+        if(CanSeePlayer)
+            nextState = IsTargetWithinAttackHoldRange() ? AttackState : ChaseState;
+        else
+        {
+            LastKnownPlayerPosition = heardPosition;
+            LastStimulusTime = _lastHeardFootstepTime;
+            nextState = AlertState;
+        }
+        if(nextState == null)
+            return false;
+        ChangeState(nextState);
+        return true;
     }
-
-    // 2. 시야각 검사
-    if (!IsWithinViewAngle(toTarget))
-    {
-        return false;
-    }
-
-    // 3. 장애물 검사
-    return HasClearLineOfSight();
-}
-
     private bool TryResolvePlayerTarget()
     {
         if (target != null)
@@ -439,13 +641,14 @@ public sealed class EnemyController : MonoBehaviour
             ReferenceEquals(current, ChaseState) ||
             ReferenceEquals(current, SearchState) ||
             ReferenceEquals(current, AttackState) ||
-            ReferenceEquals(current, CoverState));
+            ReferenceEquals(current, CoverState)||
+            ReferenceEquals(current, DodgeState));
         
     }
     
-    private void HandlePlayerNoise(Character source, Vector3 position, float radius)
+    private void HandlePlayerNoise(Character source, Vector3 position, float radius,PlayerNoiseType type)
     {
-        if(!CanProcessAlertStimuli())
+        if(_stateMachine == null || !CanProcessAlertStimuli())
         {
             return;
         }
@@ -460,6 +663,14 @@ public sealed class EnemyController : MonoBehaviour
         }
         _pendingNoisePosition = position;
         _hasPendingNoise = true;
+
+        //발소리만 별로도 기억
+        //뒤이어 총소리가 발생해도 발소리 기록은 그대로
+        if(type == PlayerNoiseType.Footstep)
+        {
+            _lastheardFootstepPosition = position;
+            _lastHeardFootstepTime = Time.time;
+        }
     }
 
     private void UpdatePerception(float deltaTime)
@@ -468,6 +679,7 @@ public sealed class EnemyController : MonoBehaviour
         {
             _hasPendingNoise = false;
             CanSeePlayer = false;
+            _visualAttackReadyTime = float.PositiveInfinity;
             return;
         }
         _remainingPerceptionTime -= deltaTime;
@@ -476,8 +688,13 @@ public sealed class EnemyController : MonoBehaviour
             return;
         }
         _remainingPerceptionTime = detectionInterval;
+        bool previouslyVisible = CanSeePlayer;
         CanSeePlayer = CanDetectPlayer();
-
+        if (CanSeePlayer && !previouslyVisible)
+        {
+            float delay = behaviorProfile != null ? behaviorProfile.SampleVisualReactionDelay() : 0f;
+            _visualAttackReadyTime = Time.time + delay;
+        }
         bool perceivedSomething  = false;
         if (CanSeePlayer)
         {
@@ -502,6 +719,11 @@ public sealed class EnemyController : MonoBehaviour
     }
     private void UpdateReloadDecision(float deltaTime)
     {
+        if(_stateMachine != null && (ReferenceEquals(_stateMachine.CurrentState, CoverState) || ReferenceEquals(_stateMachine.CurrentState, DodgeState)))
+        {
+            _timeWithoutSight = 0f;
+            return;
+        }
         if(!reloadWhenTargetnotVisible || _weapon == null || !_weapon.isActiveAndEnabled)
         {
             _timeWithoutSight = 0f;
@@ -517,20 +739,56 @@ public sealed class EnemyController : MonoBehaviour
         if(_timeWithoutSight < delay) return;
         if(_weapon.CanStartReload) _weapon.TryStartReload();
     }
-    public void FaceLastKnownPosition(float deletaTime)
+
+    private void UpdateCoverDecision()
     {
-        Vector3 direction = LastKnownPlayerPosition - transform.position;
-        direction.y = 0f;
-        if(direction.sqrMagnitude <= FacingDirectionSqrEpsilon)
-        {
+        if (!CanUseCover)
             return;
-        }
-        Quaternion targetRotation = Quaternion.LookRotation(direction);
-        transform.rotation = Quaternion.RotateTowards(
-            transform.rotation,
-            targetRotation,
-            alertTrunSpeed * deletaTime);
+        if(!isActiveAndEnabled || !HasUsableWeapon || !CanNaviagate || !HasTarget || !CanSeePlayer || CoverState == null || _stateMachine == null)
+            return;
+
+        IState current = _stateMachine.CurrentState;
+
+        if(!ReferenceEquals(current, AttackState) && !ReferenceEquals(current, ChaseState))
+            return;
+        
+        if(ShouldDeferCoverForRetreat || TryGetRecentCloseFootstep(out _))
+            return;
+        
+        float now = Time.time;
+
+        if(now < _nextCoverAttempTime)
+            return;
+        bool reloadRequested = ShouldSeekCoverForReload();
+        bool pressureRequested = ShouldSeekCoverForPressure;
+
+        if(!reloadRequested && !pressureRequested)
+            return;
+        _nextCoverAttempTime = now + Mathf.Max(MinimumCoverDecisionInterval, coverRetryInterval);
+
+        TryEnterCover(reloadOnArrival: reloadRequested);
+
     }
+    public void FaceLastKnownPosition(float deltaTime)
+    {
+        FacePosition(LastKnownPlayerPosition, deltaTime);
+    }
+
+    public void FacePosition(Vector3 position, float deltaTime)
+    {
+        if (deltaTime <= 0f)
+            return;
+
+        Vector3 direction = position - transform.position;
+        direction.y = 0f;
+
+        if (direction.sqrMagnitude <= FacingDirectionSqrEpsilon)
+            return;
+
+        Quaternion targetRotation = Quaternion.LookRotation(direction);
+        transform.rotation = Quaternion.RotateTowards( transform.rotation, targetRotation, alertTrunSpeed * deltaTime);
+    }
+
     public bool IsTargetInAttackRange()
     {
         if(!HasTarget || !CanSeePlayer)
@@ -554,6 +812,16 @@ public sealed class EnemyController : MonoBehaviour
     }
     public bool TryRequestAttack()
     {
+        if(IsDodging)
+            return false;
+
+        // 발견 후 반응 시간이 지나지 않았으면 아직 발사 X
+        if (!HasCompletedVisualReaction)
+            return false;
+
+        if(Time.time < _nextAttackTime)
+            return false;
+
         if(!HasWeaponData || _weapon == null || !_weapon.CanRequestFire  || !HasTarget || !CanSeePlayer || !IsTargetWithinAttackHoldRange())
         {
             return false;
@@ -579,20 +847,361 @@ public sealed class EnemyController : MonoBehaviour
             return false;
         }
         Vector3 aimPosition = target.position + Vector3.up * targetAimHeight;
-        return _weapon.TryFire(aimPosition);
+        if(!_weapon.HasClearShot(aimPosition, sightBlockingMask))
+            return false;
+        if(!_weapon.TryFire(aimPosition))
+            return false;
+        RecordSuccessfulAttack();
+        return true;
     }
 
-    public bool TryEnterCover()
+    public bool TryEnterCover(bool reloadOnArrival = false)
     {
-        if(!isActiveAndEnabled || _stateMachine == null || _stateMachine.CurrentState == null || CoverState == null || ReferenceEquals(_stateMachine.CurrentState, CoverState) || !HasTarget || !CanSeePlayer)
+        if (!CanUseCover)
             return false;
+        if (!isActiveAndEnabled ||!CanNaviagate ||!HasUsableWeapon ||_stateMachine == null || _stateMachine.CurrentState == null ||CoverState == null ||ReferenceEquals(_stateMachine.CurrentState, CoverState) ||!HasTarget || !CanSeePlayer)
+            return false;
+    
+        if(ShouldDeferCoverForRetreat || TryGetRecentCloseFootstep(out _))
+            return false;
+
         IState current = _stateMachine.CurrentState;
         if(!ReferenceEquals(current, AttackState) && !ReferenceEquals(current, ChaseState))
             return false;
-        if(!CoverState.TryPrepare())
+
+        if(!CoverState.TryPrepare(reloadOnArrival))
             return false;
+
         ChangeState(CoverState);
         return true;
+    }
+
+    public bool TryStartCoverReload()
+    {
+        return HasUsableWeapon && _weapon.CanStartReload && _weapon.TryStartReload();
+    }
+
+    public void NotifyCoverExited()
+    {
+        _nextCoverAttempTime = Time.time + Mathf.Max(MinimumCoverDecisionInterval, coverRetryInterval);
+    }
+
+    public void PauseAttackCycle()
+    {
+        if(_shotsInAttackCycle > 0)
+        {
+            _nextAttackTime = Mathf.Max(_nextAttackTime, Time.time + Mathf.Max(WeaponData.MinimumShotInterval, BurstCooldown));
+        }
+        _shotsInAttackCycle = 0;
+    }
+    private void RecordSuccessfulAttack()
+    {
+        _shotsInAttackCycle++;
+        if(_shotsInAttackCycle >= Mathf.Max(1, BurstCount))
+        {
+            _shotsInAttackCycle = 0;
+            _nextAttackTime = Time.time + Mathf.Max(WeaponData.MinimumShotInterval, BurstCooldown);
+            return;
+        }
+        _nextAttackTime = Time.time + Mathf.Max(WeaponData.MinimumShotInterval, AttackInterval);
+    }
+
+    public float SampleCoverHoldDuration()
+    {
+        float baseDuration = Mathf.Max(MinimumCoverHoldDuration, coverHoldDuration);
+        float jitter = Mathf.Max(0f, coverHoldJitter);
+        float minimum = Mathf.Max(MinimumCoverHoldDuration,baseDuration - jitter);
+        float maximum = baseDuration + jitter;
+        return UnityEngine.Random.Range(minimum, maximum);
+    }
+
+    private void HandleDamageReceived(DamageInfo damageInfo)
+    {
+        if (!CanReactToHit)
+            return;
+
+        // 모든 피격은 기존처럼 위험도에 반영
+        if (CombatPressure != null)
+            CombatPressure.RegisterHit();
+        #if UNITY_EDITOR
+        string stateName =
+            _stateMachine?.CurrentState?.GetType().Name ?? "None";
+
+        float pressure = CombatPressure != null
+            ? CombatPressure.PressureNormalized
+            : 0f;
+
+        bool highPressure = CombatPressure != null &&
+            CombatPressure.IsHighPressure;
+
+        Debug.Log(
+            $"[실제 피격] Enemy={name}, " +
+            $"State={stateName}, " +
+            $"Pressure={pressure:F2}, High={highPressure}, " +
+            $"DodgeWait={Mathf.Max(0f, _nextDodgeAttemptTime - Time.time):F2}, " +
+            $"DecisionWait={Mathf.Max(0f, _nextAutoDodgeDecisionTime - Time.time):F2}, " +
+            $"Visible={CanSeePlayer}, Reloading={WeaponIsReloading}",
+            this);
+        #endif
+        if (_stateMachine == null || _stateMachine.CurrentState == null)
+            return;
+  
+        IState current = _stateMachine.CurrentState;
+
+        // 엄폐 중에는 기존 피킹 복귀를 우선
+        if (CoverState != null && ReferenceEquals(current, CoverState))
+        {
+            CoverState.QueueHitReaction();
+            return;
+        }
+
+        // 자동 구르기는 Attack 상태에서 받은 피격만 허용
+        if (!autoDodgeOnHit || !ReferenceEquals(current, AttackState))
+            return;
+        
+        float now = Time.time;
+
+        // 쿨다운 중 피격을 나중에 실행할 구르기로 저장하지 않음.
+        if (now < _nextDodgeAttemptTime || now < _nextAutoDodgeDecisionTime)
+            return;
+        
+        // 이벤트에서는 이동하거나 상태를 전환하지 않음
+        // 같은 프레임의 여러 피격은 하나의 반응 예약으로 합침
+        _pendingDodgeHit = true;
+        _pendingDodgeHitTime = now;
+    }
+
+    private bool ShouldSeekCoverForReload()
+    {
+        if(!seekCoverWhenAmmoLow || !HasUsableWeapon || !WeaponNeedsReload)
+            return false;
+        
+        int capacity = _weapon.LoadedCapacity;
+
+        if(capacity <= 0)
+            return false;
+        
+        float ammoRatio = _weapon.LoadedRounds / (float)capacity;
+
+        return ammoRatio <= Mathf.Clamp01(lowAmmoRatio);
+    }
+    public bool TryStartDodge()
+    {
+        if (!CanUseDodge)
+            return false;
+
+        if (!isActiveAndEnabled || !CanReactToHit || !CanNaviagate || !HasUsableWeapon || !HasTarget || !CanSeePlayer || WeaponIsReloading || DodgeState == null || _stateMachine == null)
+            return false;
+        
+        //전투 상태에서만 시작
+        if (!ReferenceEquals(_stateMachine.CurrentState, AttackState))
+            return false;
+
+        float now = Time.time;
+
+        if (now < _nextDodgeAttemptTime)
+            return false;
+
+        //매 프레임 다시 검사하지 않도록 제한
+        _nextDodgeAttemptTime = now + Mathf.Max(0.1f, dodgeRetryDelay);
+
+        if (!DodgeState.TryPrepare())
+            return false;
+
+        ChangeState(DodgeState);
+        return true;
+    }
+
+    public void NotifyDodgeExited()
+    {
+        _nextDodgeAttemptTime = Mathf.Max(
+            _nextDodgeAttemptTime,
+            Time.time + Mathf.Max(0.1f, dodgeCooldown));
+    }
+
+    private void UpdateDodgeReaction(float deltaTime)
+    {
+        if (!CanUseDodge)
+        {
+            _pendingDodgeHit = false;
+            return;
+        }
+        if (deltaTime <= 0f || !_pendingDodgeHit)
+            return;
+
+        // 이 예약은 이번 판단에서 한 번만 사용.
+        _pendingDodgeHit = false;
+
+        float now = Time.time;
+        float memoryDuration = Mathf.Max(0.1f, dodgeHitMemoryDuration);
+
+        if (now - _pendingDodgeHitTime > memoryDuration)
+            return;
+
+        if (!autoDodgeOnHit || !CanReactToHit ||!CanNaviagate ||!HasUsableWeapon ||!HasTarget || !CanSeePlayer || WeaponIsReloading || DodgeState == null || _stateMachine == null)
+            return;
+        
+        if (!ReferenceEquals(_stateMachine.CurrentState, AttackState))
+            return;
+
+        if ( now < _nextDodgeAttemptTime || now < _nextAutoDodgeDecisionTime)
+            return;
+    
+        // 기존 후퇴 거리와 같은 기준을 사용.
+        bool needsRetreat = ShouldDeferCoverForRetreat;
+
+        bool underHighPressure = CombatPressure != null && CombatPressure.isActiveAndEnabled && CombatPressure.IsHighPressure;
+
+        if (!needsRetreat && !underHighPressure)
+            return;
+
+        float chance = Mathf.Clamp01( needsRetreat ? closeHitDodgeChance : highPressureDodgeChance);
+
+        if (chance <= 0f)
+            return;
+
+        // 확률에서 탈락해도 다음 판단까지 기다림
+        _nextAutoDodgeDecisionTime = now + Mathf.Max(0.1f, autoDodgeDecisionInterval);
+
+        // 1이면 반드시 확률 검사를 통과
+        if (chance < 1f && UnityEngine.Random.value >= chance)
+            return;
+
+        TryStartDodge();
+    }
+    public bool TryRequestSuppressionFire(Vector3 aimPosition)
+    {
+        if (!CanUseSuppression || !CanReactToHit || !HasTarget || CanSeePlayer || IsDodging || !HasWeaponData || _weapon == null || WeaponIsReloading ||!_weapon.CanRequestFire)
+            return false;
+
+        //Attack State일때만 허용
+        if (_stateMachine == null || !ReferenceEquals(_stateMachine.CurrentState, AttackState))
+            return false;
+        
+        if (Time.time < _nextAttackTime)
+            return false;
+
+        // 실제 플레이어 위치가 아니라 전달받은 고정 조준점만 사용합니다.
+        Vector3 direction = aimPosition - transform.position;
+        direction.y = 0f;
+
+        if (direction.sqrMagnitude <= FacingDirectionSqrEpsilon)
+            return false;
+
+        float range = AttackHoldRange;
+
+        if (direction.sqrMagnitude > range * range)
+            return false;
+
+        Vector3 forward = transform.forward;
+        forward.y = 0f;
+
+        if (forward.sqrMagnitude <= FacingDirectionSqrEpsilon)
+            return false;
+
+        float facingDot = Vector3.Dot(forward.normalized,direction.normalized);
+
+        if (facingDot < _attackAimDotThreshold)
+            return false;
+
+        if (!_weapon.HasSafeMuzzle(sightBlockingMask))
+            return false;
+
+        if (!_weapon.TryFire(aimPosition))
+            return false;
+        
+        RecordSuccessfulAttack();
+        return true;
+    }
+
+    public bool TryMoveToAreaSearchPoint(Vector3 searchCenter, Vector3[] searchedPositions,int searchedPositionCount)
+    {
+        if (searchedPositions == null ||  searchedPositionCount < 0 || searchedPositionCount > searchedPositions.Length)
+            return false;
+ 
+        if (!CanNaviagate || _searchPath == null)
+            return false;
+
+        float radius = AreaSearchRadius;
+
+        if (radius <= 0f)
+            return false;
+
+        Vector3 origin = _agent.nextPosition - Vector3.up * _agent.baseOffset;
+
+        float stopDistance = Mathf.Max( MinimumSearchStoppingDistance, SearchStoppingDistance);
+        float exclusionRadius = Mathf.Max( 0f, searchedPositionExclusionRadius);
+        if (exclusionRadius > 0f)
+            exclusionRadius += stopDistance;
+        float minimumTravel = Mathf.Max( MinimumSearchTravelDistance, stopDistance * 2f);
+        float minimumTravelSquared = minimumTravel * minimumTravel;
+        float radiusSquared = radius * radius;
+
+        NavMeshQueryFilter filter = new NavMeshQueryFilter
+        {
+            agentTypeID = _agent.agentTypeID,
+            areaMask = _agent.areaMask
+        };
+
+        for (int i = 0; i < SearchCandidateAttempts; i++)
+        {
+            Vector2 offset = UnityEngine.Random.insideUnitCircle * radius;
+
+            Vector3 candidate = searchCenter + new Vector3(offset.x, 0f, offset.y);
+            candidate.y = origin.y;
+
+            if (!NavMesh.SamplePosition( candidate, out NavMeshHit hit, SearchSampleRadius, filter))
+                continue;
+            
+            Vector3 fromCenter = hit.position - searchCenter;
+            fromCenter.y = 0f;
+
+            if (fromCenter.sqrMagnitude > radiusSquared)
+                continue;
+
+            // 현재 자리 바로 옆을 새 수색 지점으로 선택하지 않습니다.
+            Vector3 travel = hit.position - origin;
+            travel.y = 0f;
+
+            if (travel.sqrMagnitude < minimumTravelSquared)
+                continue;
+
+            if (IsNearSearchedPosition( hit.position, searchedPositions, searchedPositionCount, exclusionRadius))
+                continue;
+   
+            if (!_agent.CalculatePath(hit.position, _searchPath))
+                continue;
+
+            // 부분 경로는 목적지까지 도달할 수 없으므로 제외합니다.
+            if (_searchPath.status != NavMeshPathStatus.PathComplete)
+                continue;
+
+            _agent.stoppingDistance = stopDistance;
+
+            if (!_agent.SetPath(_searchPath))
+                continue;
+
+            _agent.isStopped = false;
+            return true;
+        }
+
+        return false;
+    }
+    private bool IsNearSearchedPosition( Vector3 candidate, Vector3[] searchedPositions, int searchedPositionCount, float exclusionRadius)
+    {
+        if (exclusionRadius <= 0f)
+            return false;
+
+        float radiusSquared = exclusionRadius * exclusionRadius;
+
+        for (int i = 0; i < searchedPositionCount; i++)
+        {
+            Vector3 difference = candidate - searchedPositions[i];
+            difference.y = 0f;
+            if (difference.sqrMagnitude <= radiusSquared)
+                return true;
+        }
+        return false;
     }
 
 #if UNITY_EDITOR
@@ -602,8 +1211,11 @@ public sealed class EnemyController : MonoBehaviour
         _viewDotThreshold = Mathf.Cos(viewAngle * 0.5f * Mathf.Deg2Rad);
         _attackAimDotThreshold = Mathf.Cos(attackAimTolerance * Mathf.Deg2Rad);
     }
-
     private const string EnterCoverTestMenu = "Test/Enter Cover";
+    private const string SimulateCombatHitMenu = "Test/Simulate Combat Hit";
+    private const string SimulatePeekHitMenu = "Test/Simulate Peek Hit";
+    private const string StartDodgeTestMenu = "Test/Start Dodge";
+    
     [ContextMenu(EnterCoverTestMenu)]
     private void TestEnterCover()
     {
@@ -621,6 +1233,62 @@ public sealed class EnemyController : MonoBehaviour
                 : "엄폐 진입 실패: 전투 상태, 시야, 후보 조건을 확인하세요.",
             this);
     }
+
+    [ContextMenu(SimulatePeekHitMenu)]
+    private void TestSimulatePeekHit()
+    {
+        if(!Application.isPlaying || !CanReactToHit || _stateMachine == null || CoverState == null || !ReferenceEquals(_stateMachine.CurrentState, CoverState))
+        {
+            Debug.LogWarning("Play 모드에서 살아 있는 적이 엄폐 상태일 때 실행하세요.", this);
+            return;
+        }
+
+        bool accepted = CoverState.QueueHitReaction();
+        Debug.Log(accepted ? "피격 반응 예약 완료. 다음 Tick에서 엄폐 복귀를 시도합니다." : "현재는 피킹 이동 또는 피킹 사격 단계가 아닙니다.", this);
+    }
+
+    [ContextMenu(SimulateCombatHitMenu)]
+    private void TestSimulateCombatHit()
+    {
+        if (!Application.isPlaying ||
+            !CanReactToHit ||
+            CombatPressure == null ||
+            !CombatPressure.isActiveAndEnabled)
+        {
+            Debug.LogWarning(
+                "Play 모드에서 HealthSystem과 EnemyCombatPressure 연결을 확인하세요.",
+                this);
+            return;
+        }
+
+        // 실제 체력을 감소시키지 않고 AI의 피격 수신 경로만 테스트.
+        HandleDamageReceived(default);
+
+        Debug.Log(
+            $"Pressure: {CombatPressure.PressureNormalized:F2}, " +
+            $"High Pressure: {CombatPressure.IsHighPressure}",
+            this);
+    }
+
+    [ContextMenu(StartDodgeTestMenu)]
+    private void TestStartDodge()
+    {
+        if (!Application.isPlaying)
+        {
+            Debug.LogWarning("Play 모드에서 실행하세요.", this);
+            return;
+        }
+
+        bool started = TryStartDodge();
+
+        Debug.Log(
+            started
+                ? "구르기 상태 진입."
+                : "구르기 시작 실패: Attack 상태, 시야, 체력, 재장전, " +
+                "쿨다운, 회피 후보를 확인하세요.",
+            this);
+    }
+
 #endif
 
 }

@@ -1,3 +1,4 @@
+using System;
 using UnityEngine;
 
 [DisallowMultipleComponent]
@@ -6,6 +7,7 @@ public sealed class EnemyWeapon : MonoBehaviour
 {
     private const string DefaultBulletPoolKey = "EnemyBullet";
     private const string DefaultCasingPoolKey = "Casing";
+    private const float MuzzleClearanceRadius = 0.02f;
     private const float DirectionSqrEpsilon = 0.0001f;
     [Header("References")]
     [SerializeField] private Transform muzzle;
@@ -43,6 +45,21 @@ public sealed class EnemyWeapon : MonoBehaviour
     public bool CanRequestFire => isActiveAndEnabled && _ammoSupply != null && (_ammoSupply.CanFire || ( interruptReloadToAttack && _ammoSupply.CanInterruptReload));
     public bool CanStartReload => isActiveAndEnabled && _ammoSupply != null && _ammoSupply.CanStartReload;
 
+    public bool IsReadyForAI => isActiveAndEnabled && _ammoSupply != null;
+    public int LoadedCapacity => _ammoSupply != null ? _ammoSupply.LoadedCapacity : 0;
+    public bool NeedsReload => IsReadyForAI && LoadedCapacity > 0 && LoadedRounds < LoadedCapacity;
+
+    public float EstimatedReloadWait
+    {
+        get
+        {
+            if(!IsReadyForAI || weaponData == null)
+                return 0f;
+            int missingRounds = Mathf.Max(1, LoadedCapacity -LoadedRounds);
+            float reloadDuration = weaponData.reloadType == WeaponReloadType.InsertOneRound ? missingRounds * Mathf.Max(WeaponData.MinimumShotInterval,weaponData.insertRoundTime) : Mathf.Max(WeaponData.MinimumShotInterval, weaponData.reloadTime);
+            return reloadDuration + Mathf.Max(0f, weaponData.actionCycleTime);
+        }
+    }
     private void Awake()
     {
         if(muzzle == null || weaponData == null || reserveAmmo == null || string.IsNullOrEmpty(bulletPoolKey))
@@ -164,6 +181,30 @@ public sealed class EnemyWeapon : MonoBehaviour
         return true;
     }
 
+    // 총구가 벽 안에 있거나,몸과 총구 사이에 벽이 끼어 있는지 검사
+    public bool HasSafeMuzzle(LayerMask blockingMask)
+    {
+        if (!isActiveAndEnabled || muzzle == null)
+            return false;
+
+        Vector3 muzzlePosition = muzzle.position;
+
+        if (Physics.CheckSphere(muzzlePosition, MuzzleClearanceRadius, blockingMask,QueryTriggerInteraction.Ignore))
+            return false;
+        
+        Vector3 bodyPosition = transform.position;
+        bodyPosition.y = muzzlePosition.y;
+
+        return !Physics.Linecast(bodyPosition, muzzlePosition, blockingMask, QueryTriggerInteraction.Ignore);
+    }
+
+    public bool HasClearShot(Vector3 aimPosition, LayerMask blockingMask)
+    {
+        if (!HasSafeMuzzle(blockingMask))
+            return false;
+            
+        return !Physics.Linecast(muzzle.position, aimPosition, blockingMask, QueryTriggerInteraction.Ignore);
+    }
     public bool TryStartReload()
     {
         if(!CanStartReload) return false;
