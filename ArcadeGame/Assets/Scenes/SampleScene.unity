@@ -715,7 +715,7 @@ Canvas:
   m_GameObject: {fileID: 105042789}
   m_Enabled: 1
   serializedVersion: 3
-  m_RenderMode: 1
+  m_RenderMode: 0
   m_Camera: {fileID: 184937668}
   m_PlaneDistance: 100
   m_PixelPerfect: 0
@@ -6369,7 +6369,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 4aa0fe1f7a8e50f48b69ff03fc6b761b, type: 2}
+  - {fileID: 2100000, guid: 10380c46dcdd57c4994bc6af1946ab94, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -6413,14 +6413,12 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   viewRadius: 15
   viewAngle: 45
-  targetMask:
-    serializedVersion: 2
-    m_Bits: 512
   obstacleMask:
     serializedVersion: 2
     m_Bits: 1025
-  meshResolution: 0.01
   viewMeshFilter: {fileID: 833004685}
+  maskPlaneHeight: 0
+  raySegments: 96
 --- !u!1 &841061933
 GameObject:
   m_ObjectHideFlags: 0
@@ -7393,7 +7391,7 @@ Camera:
   m_Depth: 0
   m_CullingMask:
     serializedVersion: 2
-    m_Bits: 3072
+    m_Bits: 2048
   m_RenderingPath: -1
   m_TargetTexture: {fileID: 8400000, guid: 9945723b94a2bfa45a384fdeec67a1f2, type: 2}
   m_TargetDisplay: 0
@@ -7882,14 +7880,12 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   viewRadius: 2
   viewAngle: 360
-  targetMask:
-    serializedVersion: 2
-    m_Bits: 512
   obstacleMask:
     serializedVersion: 2
     m_Bits: 1025
-  meshResolution: 0.01
   viewMeshFilter: {fileID: 1021580724}
+  maskPlaneHeight: 0
+  raySegments: 96
 --- !u!23 &1021580723
 MeshRenderer:
   m_ObjectHideFlags: 0
@@ -7910,7 +7906,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 555af8dd958927f46a3a74919e89166c, type: 2}
+  - {fileID: 2100000, guid: 35e83c053847e3f46904f249c9e2f1f9, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -10249,9 +10245,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 1344c3c82d62a2a41a3576d8abb8e3ea, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  m_Material: {fileID: 2100000, guid: 9bef8df251b5e6c429eaaf7d0190ffb0, type: 2}
+  m_Material: {fileID: 2100000, guid: 28cc65e1e5cf5bc46b27e6057e9e3a71, type: 2}
   m_Color: {r: 1, g: 1, b: 1, a: 1}
-  m_RaycastTarget: 1
+  m_RaycastTarget: 0
   m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
   m_Maskable: 1
   m_OnCullStateChanged:
@@ -13310,6 +13306,7 @@ GameObject:
   - component: {fileID: 1741318430}
   - component: {fileID: 1741318432}
   - component: {fileID: 1741318433}
+  - component: {fileID: 1741318437}
   - component: {fileID: 1741318434}
   - component: {fileID: 1741318435}
   - component: {fileID: 1741318436}
@@ -13527,6 +13524,28 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   surfaceType: 1
+--- !u!114 &1741318437
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1741318427}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: fa2da866ba3e9af41b4ead6ea4da701d, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  forwardView: {fileID: 833004686}
+  nearbyView: {fileID: 1021580722}
+  eyePoint: {fileID: 485584103}
+  targetMask:
+    serializedVersion: 2
+    m_Bits: 512
+  obstacleMask:
+    serializedVersion: 2
+    m_Bits: 1024
+  scanInterval: 0.1
 --- !u!1 &1753942997
 GameObject:
   m_ObjectHideFlags: 0
@@ -16020,6 +16039,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a87ed6dad8b87ae4ca441c11704609a0, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  visibilityPoint: {fileID: 0}
 --- !u!114 &2039950120
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -16063,6 +16083,7 @@ MonoBehaviour:
   searchChaseRetryDelay: 1
   searchLookHalfAngle: 60
   searchLookPauseDuration: 0.3
+  searchedPositionExclusionRadius: 2
   reloadWhenTargetnotVisible: 1
   reloadAfterLostSightDelay: 2
   coverMoveSpeed: 3.5

@@ -1,131 +1,238 @@
-using System.Collections;
-using System.Collections.Generic;
 using UnityEngine;
 
-public class FieldOfView : MonoBehaviour
+[DisallowMultipleComponent]
+public sealed class FieldOfView : MonoBehaviour
 {
-      [Header("FOV Settings")]
-      public float viewRadius = 10f;
-      [Range(0,360)] public float viewAngle = 90f;
-      public LayerMask targetMask;
-      public LayerMask obstacleMask;
-      
-      [Header("Mesh Settings")] 
-      public float meshResolution = 1f;
-      public MeshFilter viewMeshFilter;
-      private Mesh _viewMesh;
-      
-      private List<HideableEntity> _previouslyVisibleTargets = new List<HideableEntity>();
-      private const int MaxTargets = 50; 
-      private Collider[] _targetsInViewRadius = new Collider[MaxTargets];
-      void Start()
-      {
-            _viewMesh = new Mesh();
-            _viewMesh.name = "ViewMesh";
-            viewMeshFilter.mesh = _viewMesh;
-            
-            StartCoroutine(FindTargetsWithDelay(0.1f));
-      }
+    private const int MinimumSegments = 4;
+    private const int MaximumSegments = 512;
+    private const int TriangleIndexCount = 3;
 
-      void LateUpdate()
-      {
-            DrawFieldOfView();
-      }
+    private const float MinimumRadius = 0.01f;
+    private const float FullCircleAngle = 360f;
+    private const float Half = 0.5f;
 
-      private IEnumerator FindTargetsWithDelay(float delay)
-      {
-            while (true)
+    private const string RuntimeMeshName = "RuntimeVisionMesh";
+
+    [Header("FOV Settings")]
+    [Min(0f)] public float viewRadius = 10f;
+
+    [Range(0f, FullCircleAngle)] public float viewAngle = 90f;
+
+    public LayerMask obstacleMask;
+
+    [Header("Mesh Settings")]
+    public MeshFilter viewMeshFilter;
+
+    [Header("Mask Projection")]
+    [Tooltip("시야 마스크를 그릴 월드 공간의 바닥 높이입니다.")]
+    [SerializeField] private float maskPlaneHeight = 0f;
+
+    [SerializeField, Range(MinimumSegments, MaximumSegments)] private int raySegments = 96;
+
+    private Transform _meshTransform;
+
+    private Mesh _viewMesh;
+    private Mesh _previousMesh;
+
+    private Vector3[] _vertices;
+    private Vector2[] _uvs;
+    private Vector3[] _localRayDirections;
+    private int[] _triangles;
+
+    private int _cachedDirectionSegments = -1;
+    private float _cachedDirectionAngle = -1f;
+    private int _uploadedSegments = -1;
+
+    private void Awake()
+    {
+        if (viewMeshFilter == null)
+            TryGetComponent(out viewMeshFilter);
+
+        if (viewMeshFilter == null)
+        {
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            Debug.LogError("FieldOfView의 View Mesh Filter를 연결해 주세요.", this);
+#endif
+            enabled = false;
+            return;
+        }
+
+        _meshTransform = viewMeshFilter.transform;
+        _previousMesh = viewMeshFilter.sharedMesh;
+
+        // 최대 크기로 한 번 생성하고 필요한 범위만 사용합니다.
+        _vertices = new Vector3[MaximumSegments + 2];
+        _uvs = new Vector2[MaximumSegments + 2];
+        _localRayDirections = new Vector3[MaximumSegments + 1];
+        _triangles = new int[MaximumSegments * TriangleIndexCount];
+
+        for (int i = 0; i < MaximumSegments; i++)
+        {
+            int index = i * TriangleIndexCount;
+
+            _triangles[index] = 0;
+            _triangles[index + 1] = i + 1;
+            _triangles[index + 2] = i + 2;
+        }
+
+        _viewMesh = new Mesh
+        {
+            name = RuntimeMeshName
+        };
+
+        _viewMesh.MarkDynamic();
+        viewMeshFilter.sharedMesh = _viewMesh;
+    }
+
+    private void LateUpdate()
+    {
+        if (_viewMesh == null || _meshTransform == null)
+            return;
+
+        float radius = Mathf.Max(0f, viewRadius);
+        float angle = Mathf.Clamp(viewAngle, 0f, FullCircleAngle);
+
+        if (radius < MinimumRadius || angle <= 0f)
+        {
+            ClearViewMesh();
+            return;
+        }
+
+        int segments = Mathf.Clamp(
+            raySegments,
+            MinimumSegments,
+            MaximumSegments);
+
+        PrepareRayDirections(segments, angle);
+        UpdateViewMesh(segments, radius);
+    }
+
+    private void PrepareRayDirections(int segments, float angle)
+    {
+        if (_cachedDirectionSegments == segments &&
+            Mathf.Approximately(_cachedDirectionAngle, angle))
+        {
+            return;
+        }
+
+        float startAngle = -angle * Half;
+        float angleStep = angle / segments;
+
+        for (int i = 0; i <= segments; i++)
+        {
+            float radians =
+                (startAngle + angleStep * i) * Mathf.Deg2Rad;
+
+            _localRayDirections[i] = new Vector3(
+                Mathf.Sin(radians),
+                0f,
+                Mathf.Cos(radians));
+        }
+
+        if (angle >= FullCircleAngle)
+        {
+            _localRayDirections[segments] =
+                _localRayDirections[0];
+        }
+
+        _cachedDirectionSegments = segments;
+        _cachedDirectionAngle = angle;
+    }
+
+    private void UpdateViewMesh(int segments, float radius)
+    {
+        int vertexCount = segments + 2;
+        int indexCount = segments * TriangleIndexCount;
+
+        Vector3 origin = transform.position;
+
+        Quaternion yawRotation = Quaternion.Euler( 0f, transform.eulerAngles.y,0f);
+
+        Matrix4x4 worldToMesh = _meshTransform.worldToLocalMatrix;
+
+        float inverseDiameter = Half / radius;
+
+        Vector3 meshOrigin = origin;
+        meshOrigin.y = maskPlaneHeight;
+
+        _vertices[0] = worldToMesh.MultiplyPoint3x4(meshOrigin);
+        _uvs[0] = new Vector2(Half, Half);
+
+        for (int i = 0; i <= segments; i++)
+        {
+            Vector3 localDirection = _localRayDirections[i];
+            Vector3 worldDirection = yawRotation * localDirection;
+
+            float distance = radius;
+
+            if (Physics.Raycast(
+                origin,
+                worldDirection,
+                out RaycastHit hit,
+                radius,
+                obstacleMask,
+                QueryTriggerInteraction.Ignore))
             {
-                  yield return new WaitForSeconds(delay);
-                  FindVisibleTargets();
-            }
-      }
-
-      private void FindVisibleTargets()
-      {
-            foreach (var entity in _previouslyVisibleTargets)
-            {
-                  if(entity) entity.SetVisibility(false);
-                  
-            }
-            _previouslyVisibleTargets.Clear();
-            int targetCount = Physics.OverlapSphereNonAlloc(transform.position, viewRadius, _targetsInViewRadius, targetMask);
-            for (var i = 0; i < targetCount; ++i)
-            {
-                  Transform target = _targetsInViewRadius[i].transform;
-                  Vector3 dirToTarget = (target.position - transform.position).normalized;
-
-                  if (!(Vector3.Angle(transform.forward, dirToTarget) < viewAngle / 2f)) continue;
-                  float dstToTarget = Vector3.Distance(transform.position, target.position);
-                  if (!Physics.Raycast(transform.position, dirToTarget, dstToTarget, obstacleMask))
-                  {
-                        if (target.TryGetComponent(out HideableEntity h))
-                        {
-                              h.SetVisibility(true);
-                              _previouslyVisibleTargets.Add(h);
-                        }
-                  }
-
-            }
-      }
-
-      private void DrawFieldOfView()
-      {
-            int stepCount = Mathf.RoundToInt(viewRadius / meshResolution);
-            float stepAngleSize = viewAngle / stepCount;
-            
-            List<Vector3> viewPoints = new List<Vector3>();
-            for (int i = 0; i <= stepCount; ++i)
-            {
-                  float angle = transform.eulerAngles.y - viewAngle / 2 + stepAngleSize * i;
-                  Vector3 dir = DirFromAngle(angle, true);
-
-                  if (Physics.Raycast(transform.position, dir, out RaycastHit hit, viewRadius, obstacleMask))
-                  {
-                        viewPoints.Add(hit.point);
-                  }
-                  else
-                  {
-                        viewPoints.Add(transform.position + dir * viewRadius);
-                  }
-            }
-            int vertexCount = viewPoints.Count + 1;
-            Vector3[] vertices = new Vector3[vertexCount];
-            int[] triangles = new int[(vertexCount - 2) * 3];
-            
-            Vector2[] uvs = new Vector2[vertexCount];
-            uvs[0] = new Vector2(0.5f, 0.5f);
-            vertices[0] = Vector3.zero;
-            for (int i = 0; i < vertexCount - 1; ++i)
-            {
-                  vertices[i + 1] = transform.InverseTransformPoint(viewPoints[i]);
-                  uvs[i + 1] = new Vector2(
-                        vertices[i + 1].x / (viewRadius * 2f) + 0.5f, 
-                        vertices[i + 1].z / (viewRadius * 2f) + 0.5f
-                  );
-                  
-                  if (i < vertexCount - 2)
-                  {
-                        triangles[i * 3] = 0;
-                        triangles[i * 3 + 1] = i + 1;
-                        triangles[i * 3 + 2] = i + 2;
-                  }
-                  
+                distance = hit.distance;
             }
 
+            Vector3 worldPoint = origin + worldDirection * distance;
+            worldPoint.y = maskPlaneHeight;
+
+            int vertexIndex = i + 1;
+
+            _vertices[vertexIndex] = worldToMesh.MultiplyPoint3x4(worldPoint);
+
+            // 장애물에 잘려도 전체 시야 반경 기준 UV를 유지
+            Vector3 localOffset = localDirection * distance;
+
+            _uvs[vertexIndex] = new Vector2( Half + localOffset.x * inverseDiameter, Half + localOffset.z * inverseDiameter);
+        }
+
+        bool topologyChanged = _uploadedSegments != segments;
+
+        if (topologyChanged)
             _viewMesh.Clear();
-            _viewMesh.vertices = vertices;
-            _viewMesh.triangles = triangles;
-            _viewMesh.uv = uvs;
-            _viewMesh.RecalculateNormals();
-      }
-      public Vector3 DirFromAngle(float angleInDegrees, bool angleIsGlobal)
-      {
-            if (!angleIsGlobal)
-            {
-                  angleInDegrees += transform.eulerAngles.y;
-            }
-            return new Vector3(Mathf.Sin(angleInDegrees * Mathf.Deg2Rad),0,Mathf.Cos(angleInDegrees * Mathf.Deg2Rad));
-      }
-      
+
+        _viewMesh.SetVertices(_vertices, 0, vertexCount);
+        _viewMesh.SetUVs(0, _uvs, 0, vertexCount);
+
+        if (topologyChanged)
+        {
+            _viewMesh.SetTriangles( _triangles, 0, indexCount, 0,false, 0);
+            _uploadedSegments = segments;
+        }
+
+        // 장애물에 따라 Mesh 영역이 바뀌므로 컬링 범위를 갱신
+        _viewMesh.RecalculateBounds();
+    }
+
+    private void ClearViewMesh()
+    {
+        if (_viewMesh == null || _uploadedSegments < 0)
+            return;
+
+        _viewMesh.Clear();
+        _uploadedSegments = -1;
+    }
+
+    private void OnDisable()
+    {
+        ClearViewMesh();
+    }
+
+    private void OnDestroy()
+    {
+        if (_viewMesh == null)
+            return;
+
+        if (viewMeshFilter != null &&
+            viewMeshFilter.sharedMesh == _viewMesh)
+        {
+            viewMeshFilter.sharedMesh = _previousMesh;
+        }
+
+        Destroy(_viewMesh);
+        _viewMesh = null;
+    }
 }
