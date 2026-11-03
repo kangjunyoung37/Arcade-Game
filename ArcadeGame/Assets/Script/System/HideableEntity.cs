@@ -4,17 +4,28 @@ using UnityEngine;
 [DisallowMultipleComponent]
 public class HideableEntity : MonoBehaviour
 {
+   private const int MaxAdditionalVisibilityPoints = 2;
    private const int InitialRegistryCapacity = 128;
    private static readonly List<HideableEntity> ActiveEntities = new List<HideableEntity>(InitialRegistryCapacity);
    
    [Tooltip("시야 검사 대상 지점. 비워 두면 이 오브젝트 위치를 사용합니다.")]
    [SerializeField] private Transform visibilityPoint;
+   [Tooltip("추가 시야 검사 지점. 최대 2개까지 설정할 수 있습니다.")]
+   [SerializeField] private Transform[] additionalVisibilityPoints;
    private Renderer[] _renderers;
    private Canvas[] _canvases;
    private bool _visibilityApplied;
    public bool IsVisible { get; private set; }
    public Vector3 VisibilityPosition => visibilityPoint != null ? visibilityPoint.position : transform.position;
    public static int ActiveCount => ActiveEntities.Count;
+   public int VisibilitySampleCount
+{
+    get
+    {
+        int additionalCount = additionalVisibilityPoints != null ? Mathf.Min(additionalVisibilityPoints.Length, MaxAdditionalVisibilityPoints) : 0;
+        return 1 + additionalCount;
+    }
+}
    public static HideableEntity GetActiveEntity(int index)
    {
       return ActiveEntities[index];
@@ -68,5 +79,27 @@ public class HideableEntity : MonoBehaviour
                   targetCanvas.enabled = isVisible;
          }
       }
+   }
+   public bool TryGetVisibilitySample(int index, out Vector3 position)
+   {
+      position = default;
+
+      if (index < 0 || index >= VisibilitySampleCount)
+         return false;
+
+      // 첫 번째 검사는 기존 지점을 사용합니다.
+      if (index == 0)
+      {
+         position = VisibilityPosition;
+         return true;
+      }
+
+      Transform samplePoint = additionalVisibilityPoints[index - 1];
+
+      if (samplePoint == null)
+         return false;
+
+      position = samplePoint.position;
+      return true;
    }
 }
