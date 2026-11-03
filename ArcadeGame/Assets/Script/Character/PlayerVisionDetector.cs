@@ -6,6 +6,7 @@ public sealed class PlayerVisionDetector : MonoBehaviour
     private const float MinimumScanInterval = 0.02f;
     private const float DirectionSqrEpsilon = 0.0001f;
     private const float HalfAngleMultiplier = 0.5f;
+    private const float FullCircleAngle = 360f;
 
     [Header("Vision Sources")]
     [SerializeField] private FieldOfView forwardView;
@@ -17,6 +18,13 @@ public sealed class PlayerVisionDetector : MonoBehaviour
     [SerializeField] private LayerMask obstacleMask;
 
     [SerializeField, Min(MinimumScanInterval)] private float scanInterval = 0.1f;
+    
+    [Header("Visibility Stability")]
+    [Tooltip("이미 보이는 대상에게만 적용하는 추가 거리입니다.")]
+    [SerializeField, Min(0f)] private float visibleDistanceMargin = 0.25f;
+
+    [Tooltip("이미 보이는 대상에게만 적용하는 좌우 각각의 추가 각도입니다.")]
+    [SerializeField, Min(0f)] private float visibleAngleMargin = 2f;
     private float _nextScanTime;
     private void Awake()
     {
@@ -55,54 +63,91 @@ public sealed class PlayerVisionDetector : MonoBehaviour
 
     private void ScanVisibility()
     {
-        bool forwardEnabled = forwardView != null && forwardView.isActiveAndEnabled;
+        bool forwardEnabled = forwardView != null && forwardView.isActiveAndEnabled && forwardView.viewRadius > 0f && forwardView.viewAngle > 0f;
 
-        bool nearbyEnabled = nearbyView != null && nearbyView.isActiveAndEnabled;
+        bool nearbyEnabled = nearbyView != null && nearbyView.isActiveAndEnabled && nearbyView.viewRadius > 0f;
 
-        float forwardRadius = forwardEnabled ? Mathf.Max(0f, forwardView.viewRadius) : 0f;
+        float forwardRadius = forwardEnabled ? forwardView.viewRadius : 0f;
 
-        float nearbyRadius = nearbyEnabled ? Mathf.Max(0f, nearbyView.viewRadius) : 0f;
+        float nearbyRadius = nearbyEnabled ? nearbyView.viewRadius: 0f;
 
         float forwardRadiusSquared = forwardRadius * forwardRadius;
         float nearbyRadiusSquared = nearbyRadius * nearbyRadius;
 
+        float distanceMargin = Mathf.Max(0f, visibleDistanceMargin);
+
+        // 이미 보이는 대상에게만 사용하는 유지 거리
+        float retainForwardRadius = forwardRadius + distanceMargin;
+        float retainNearbyRadius = nearbyRadius + distanceMargin;
+
+        float retainForwardRadiusSquared = retainForwardRadius * retainForwardRadius;
+        float retainNearbyRadiusSquared = retainNearbyRadius * retainNearbyRadius;
+
         Vector3 forward = forwardEnabled ? forwardView.transform.forward : transform.forward;
+
         forward.y = 0f;
+
         bool validForward = forward.sqrMagnitude > DirectionSqrEpsilon;
 
         if (validForward)
             forward.Normalize();
 
-        float angle = forwardEnabled ? Mathf.Clamp(forwardView.viewAngle, 0f, 360f) : 0f;
+        float angle = forwardEnabled ? Mathf.Clamp(forwardView.viewAngle, 0f, FullCircleAngle) : 0f;
 
-        float viewDotThreshold = Mathf.Cos(angle * HalfAngleMultiplier * Mathf.Deg2Rad);
+        float halfAngle = angle * HalfAngleMultiplier;
+
+        // 처음 발견할 때의 각도 기준입니다.
+        float viewDotThreshold = Mathf.Cos(halfAngle * Mathf.Deg2Rad);
+
+        // 좌우 각각에 여유 각도를 더합니다.
+        float retainHalfAngle = Mathf.Min(FullCircleAngle * HalfAngleMultiplier, halfAngle + Mathf.Max(0f, visibleAngleMargin));
+
+        float retainDotThreshold = Mathf.Cos(retainHalfAngle * Mathf.Deg2Rad);
 
         Vector3 rangeOrigin = transform.position;
+
         Vector3 rayOrigin = eyePoint != null ? eyePoint.position : rangeOrigin;
 
-        for (int i = 0; i < HideableEntity.ActiveCount; i++)
+        int entityCount = HideableEntity.ActiveCount;
+        for (int i = 0; i < entityCount; i++)
         {
             HideableEntity entity = HideableEntity.GetActiveEntity(i);
 
             if (entity == null)
                 continue;
+
             bool layerAllowed = (targetMask.value & (1 << entity.gameObject.layer)) != 0;
 
-            bool visible = layerAllowed && CanSee(
-                entity.VisibilityPosition,
+            if (!layerAllowed)
+            {
+                entity.SetVisibility(false);
+                continue;
+            }
+
+            // 이번 검사 직전의 표시 상태를 기준으로 선택합니다.
+            bool wasVisible = entity.IsVisible;
+
+            float selectedDotThreshold = wasVisible ? retainDotThreshold : viewDotThreshold;
+
+            float selectedForwardRadiusSquared = wasVisible ? retainForwardRadiusSquared : forwardRadiusSquared;
+
+            float selectedNearbyRadiusSquared = wasVisible ? retainNearbyRadiusSquared : nearbyRadiusSquared;
+
+            bool visible = CanSeeEntity(
+                entity,
                 rangeOrigin,
                 rayOrigin,
                 forward,
                 validForward,
-                viewDotThreshold,
+                selectedDotThreshold,
                 forwardEnabled,
                 nearbyEnabled,
-                forwardRadiusSquared,
-                nearbyRadiusSquared);
+                selectedForwardRadiusSquared,
+                selectedNearbyRadiusSquared);
 
             entity.SetVisibility(visible);
         }
-    }
+}
 
     private bool CanSee(Vector3 targetPosition,Vector3 rangeOrigin,Vector3 rayOrigin,Vector3 forward,bool validForward,float viewDotThreshold,bool forwardEnabled,bool nearbyEnabled,float forwardRadiusSquared,float nearbyRadiusSquared)
     {
@@ -137,5 +182,39 @@ public sealed class PlayerVisionDetector : MonoBehaviour
             return true;
 
         return !Physics.Raycast(rayOrigin, rayDirection / rayDistance, rayDistance, obstacleMask, QueryTriggerInteraction.Ignore);
+    }
+    private bool CanSeeEntity(HideableEntity entity, Vector3 rangeOrigin, Vector3 rayOrigin, Vector3 forward, bool validForward, float viewDotThreshold, bool forwardEnabled, bool nearbyEnabled, float forwardRadiusSquared, float nearbyRadiusSquared)
+    {
+        if (entity == null)
+            return false;
+
+        int sampleCount = entity.VisibilitySampleCount;
+
+        for (int i = 0; i < sampleCount; i++)
+        {
+            if (!entity.TryGetVisibilitySample(
+                    i,
+                    out Vector3 samplePosition))
+            {
+                continue;
+            }
+
+            bool sampleVisible = CanSee(
+                samplePosition,
+                rangeOrigin,
+                rayOrigin,
+                forward,
+                validForward,
+                viewDotThreshold,
+                forwardEnabled,
+                nearbyEnabled,
+                forwardRadiusSquared,
+                nearbyRadiusSquared);
+                
+            if (sampleVisible)
+                return true;
+        }
+
+        return false;
     }
 }
