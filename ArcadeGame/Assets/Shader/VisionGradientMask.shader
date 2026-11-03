@@ -20,7 +20,7 @@ Shader "Game/Vision/GradientMask"
 
             Cull Off
             ZWrite Off
-            ZTest Always
+            ZTest LEqual
 
             // 겹치는 시야는 더하지 않고 하나의 영역으로 합칩니다.
             Blend One One
