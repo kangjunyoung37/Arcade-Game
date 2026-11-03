@@ -4,16 +4,17 @@ using System.Collections.Generic;
 using System.Net.NetworkInformation;
 using UnityEngine;
 
+[DefaultExecutionOrder(-1000)]
 public class GameManager : MonoBehaviour
 {
     public static GameManager Instance;
     [SerializeField] private Character mainCharacter;
-    [SerializeField] private MainCamera mainCamera;
-    
+    [SerializeField] private MainCamera mainCamera;        
     [Header("Update Lists")] 
     private List<IUpdateable> _players = new List<IUpdateable>();
     private List<IUpdateable> _enemies = new List<IUpdateable>();
     private List<IUpdateable> _bullets = new List<IUpdateable>();
+    public event Action<Character> CharacterChanged;
     private void Awake()
     {
         if (Instance == null)
@@ -69,5 +70,40 @@ public class GameManager : MonoBehaviour
     {
         return mainCamera;
     }
-    
+    public bool RegisterCharacter(Character character)
+    {
+        if (character == null)
+            return false;
+
+        if (mainCharacter != null && mainCharacter != character)
+        {
+    #if UNITY_EDITOR || DEVELOPMENT_BUILD
+            Debug.LogError(
+                "이미 다른 플레이어가 GameManager에 등록되어 있습니다.",
+                this);
+    #endif
+            return false;
+        }
+
+        if (mainCharacter == character)
+            return true;
+
+        mainCharacter = character;
+        CharacterChanged?.Invoke(mainCharacter);
+
+        return true;
+    }
+    public void UnregisterCharacter(Character character)
+    {
+        if (!ReferenceEquals(mainCharacter, character))
+            return;
+
+        mainCharacter = null;
+        CharacterChanged?.Invoke(null);
+    }
+    private void OnDestroy()
+    {
+        if (Instance == this)
+            Instance = null;
+    }
 }

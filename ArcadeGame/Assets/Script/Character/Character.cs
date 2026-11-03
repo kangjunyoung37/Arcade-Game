@@ -59,18 +59,19 @@ public class Character : MonoBehaviour
     private float _accumulatedFootstepDistance;
     //Component
     private HealthSystem _health;
-    private MainCamera _mainCamera;
     private Camera mainCamera;
     private CharacterController _characterControllercc;
     private CinemachineImpulseSource _impulseSource;
     
     //Variable
     private bool _isAiming = false;
+    private bool _sceneReferencesBound;
+    private bool _isRunning = false;
+    private bool _isDodging = false;
     private Vector3 _moveDirection;
     private float _rotateSpeed = 15f;
-    private bool _isDodging = false;
     private float _lastDodgeTime;
-    private bool _isRunning = false;
+
     public float CurrentSpread { get; private set; }
 
     private void Awake()
@@ -86,12 +87,18 @@ public class Character : MonoBehaviour
 
     private void Start()
     {
-        mainCamera = Camera.main;
-        _mainCamera = mainCamera.GetComponent<MainCamera>();
-        if (currentWeaponData is not null)
+        if (!_sceneReferencesBound)
         {
-            CurrentSpread = currentWeaponData.baseSpread;
+    #if UNITY_EDITOR || DEVELOPMENT_BUILD
+            Debug.LogError("플레이어의 씬 참조가 초기화되지 않았습니다. " + "PlayerSpawnManager를 통해 생성해 주세요.", this);
+    #endif
+            enabled = false;
+            return;
         }
+
+        if (currentWeaponData != null)
+            CurrentSpread = currentWeaponData.baseSpread;
+
         _lastFootstepPosition = transform.position;
     }
     
@@ -117,14 +124,40 @@ public class Character : MonoBehaviour
         UpdateFootstepNoise();
     }
 
+
+    public bool InitializeSceneReferences( Camera gameplayCamera,Crosshair sceneCrosshair, Transform sceneAimTarget)
+    {
+        if (gameplayCamera == null ||
+            sceneCrosshair == null ||
+            sceneAimTarget == null)
+        {
+    #if UNITY_EDITOR || DEVELOPMENT_BUILD
+            Debug.LogError("플레이어의 카메라, 크로스헤어, 조준 카메라 타깃 연결이 필요합니다.", this);
+    #endif
+            return false;
+        }
+
+        mainCamera = gameplayCamera;
+        crosshair = sceneCrosshair;
+        cameraTarget = sceneAimTarget;
+
+        cameraTarget.position = transform.position;
+
+        _lastFootstepPosition = transform.position;
+        _accumulatedFootstepDistance = 0f;
+
+        _sceneReferencesBound = true;
+        return true;
+    }
     private void OnDestroy()
     {
-        if (_health is not null)
-        {
+        if (_health != null)
             _health.onDied -= HandleDeath;
-        }
-    }
 
+        if (GameManager.Instance != null)
+            GameManager.Instance.UnregisterCharacter(this);
+    }
+    
     private void CharacterMovement()
     {
         float h = Input.GetAxisRaw("Horizontal");

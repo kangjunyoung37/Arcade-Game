@@ -422,7 +422,6 @@ public sealed class EnemyController : MonoBehaviour
         }
         _stateMachine.ChangeState(nextState);
     }
-
     public void StopMoving()
     {
         if (!CanNaviagate)
@@ -498,20 +497,13 @@ public sealed class EnemyController : MonoBehaviour
     }
     private bool TryResolvePlayerTarget()
     {
-        if (target != null)
-        {
-            return true;
-        }
+        GameManager manager = GameManager.Instance;
 
-        if (GameManager.Instance == null)
-        {
-            return false;
-        }
+        Character player = manager != null ? manager.GetCharacter() : null;
 
-        Character player = GameManager.Instance.GetCharacter();
-
-        if (player == null)
+        if (player == null || !player.isActiveAndEnabled)
         {
+            target = null;
             return false;
         }
 
