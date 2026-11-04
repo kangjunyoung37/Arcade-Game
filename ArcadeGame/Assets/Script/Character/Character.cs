@@ -9,6 +9,11 @@ using Random = UnityEngine.Random;
 [RequireComponent(typeof(CharacterController))]
 public class Character : MonoBehaviour
 {
+
+    private const string BulletPoolKey = "Bullet";
+    private const string CasingPoolKey = "Casing";
+    private const float SpreadRecoveryDelayMultiplier = 1.5f;
+
     [Header("CrossHair")]
     public Crosshair crosshair;
     public LayerMask groundLayer;
@@ -24,8 +29,7 @@ public class Character : MonoBehaviour
     public float aimingSpeed = 4f;
     
     [Header("Shoot Settings")]
-    private float _lastFireTime;
-    private bool _isCooldown = false;
+    private float _lastFireTime = float.NegativeInfinity;
 
     [Header("Shoot Test")]
     public Transform bulletSpawnPoint;
@@ -62,6 +66,7 @@ public class Character : MonoBehaviour
     private Camera mainCamera;
     private CharacterController _characterControllercc;
     private CinemachineImpulseSource _impulseSource;
+    private ObjectPoolManager _weaponPool;
     
     //Variable
     private bool _isAiming = false;
@@ -73,6 +78,7 @@ public class Character : MonoBehaviour
     private float _lastDodgeTime;
 
     public float CurrentSpread { get; private set; }
+    public bool CanUseWeapon => isActiveAndEnabled &&_sceneReferencesBound && !_isRunning && !_isDodging && currentWeaponData != null;
 
     private void Awake()
     {
@@ -95,6 +101,7 @@ public class Character : MonoBehaviour
             enabled = false;
             return;
         }
+        _weaponPool = ObjectPoolManager.instance;
 
         if (currentWeaponData != null)
             CurrentSpread = currentWeaponData.baseSpread;
@@ -111,8 +118,7 @@ public class Character : MonoBehaviour
         {
             crosshair.SetAiming(_isAiming);
         }
-        
-        TryFire();
+
         if (!_isDodging)
         {
             CharacterMovement();
@@ -216,92 +222,88 @@ public class Character : MonoBehaviour
 
     #region Fire Code
 
-     private void HandleSpreadRecovery()
+    private void HandleSpreadRecovery()
     {
-        if (Time.time > _lastFireTime + currentWeaponData.fireRate * 1.5f)
-        {
-            CurrentSpread = Mathf.MoveTowards(CurrentSpread, currentWeaponData.baseSpread,
-                currentWeaponData.recoveryRate * Time.deltaTime);
-        }
-    }
-    private void TryFire()
-    {
-        if (_isCooldown || _isRunning || _isDodging) return;
-        switch (currentWeaponData.fireMode)
-        {
-            case FireMode.Single:
-                if (Input.GetMouseButtonDown(0))
-                {
-                    Fire();
-                    StartCoroutine(FireCooldown(currentWeaponData.singleFireDelay));
-                }
-                break;
+        if (currentWeaponData == null)
+            return;
 
-            case FireMode.Auto:
-                if (Input.GetMouseButton(0) && Time.time >= _lastFireTime + currentWeaponData.fireRate)
-                {
-                    Fire();
-                    _lastFireTime = Time.time;
-                }
-                break;
+        float recoveryDelay = currentWeaponData.GetShotInterval(currentWeaponData.fireMode) * SpreadRecoveryDelayMultiplier;
 
-            case FireMode.Burst:
-                if (Input.GetMouseButtonDown(0))
-                {
-                    StartCoroutine(BurstFireRoutine());
-                }
-                break;
-        }
-    }
-    
-    //Bullet Fire
-    private void Fire()
-    {
-        PlayerNoise.Emit( this,bulletSpawnPoint.position,gunshotNoiseRadius,PlayerNoiseType.Gunshot);
-        crosshair.AddSpread(CurrentSpread);
-        _impulseSource.GenerateImpulse();
-        GameObject casing = ObjectPoolManager.instance.GetGo("Casing");
-        GameObject bullet = ObjectPoolManager.instance.GetGo("Bullet");
-        //Test Casing
-        casing.transform.position = bulletSpawnPoint.position;
-        casing.transform.rotation = bulletSpawnPoint.rotation;
-        
-        var perfectDirection = (bulletSpawnPoint.right +  bulletSpawnPoint.up).normalized;
-        if (casing.TryGetComponent(out Casing casingComponent))
-            casingComponent.Eject(perfectDirection);
-        
-        float randowYaw = Random.Range(-CurrentSpread, CurrentSpread);
-        Quaternion spreadRotation = Quaternion.Euler(0, randowYaw, 0);
-        
-        bullet.transform.position = bulletSpawnPoint.position;
-        bullet.transform.rotation = bulletSpawnPoint.rotation * spreadRotation;
-        CurrentSpread += currentWeaponData.bloomPerShot;
-        CurrentSpread = Mathf.Clamp(CurrentSpread, currentWeaponData.baseSpread, currentWeaponData.maxSpread);
-        if (bullet.TryGetComponent(out Bullet b))
-        {
-            b.Init();
-        }
-        
-    }
-    
-    private IEnumerator FireCooldown(float delay)
-    {
-        _isCooldown = true;
-        yield return new WaitForSeconds(delay);
-        _isCooldown = false;
+        if (Time.time < _lastFireTime + recoveryDelay)
+            return;
+
+        CurrentSpread = Mathf.MoveTowards(CurrentSpread, Mathf.Max(0f, currentWeaponData.baseSpread), Mathf.Max(0f, currentWeaponData.recoveryRate) * Time.deltaTime);
     }
 
-    private IEnumerator BurstFireRoutine()
+    public bool TryFireWeapon()
     {
-        _isCooldown = true; 
-        for (int i = 0; i < currentWeaponData.burstCount; i++)
-        {
-            Fire();
-            yield return new WaitForSeconds(currentWeaponData.fireRate);
-        }
+        if (!CanUseWeapon || bulletSpawnPoint == null || _weaponPool == null || !_weaponPool.IsReady || GameManager.Instance == null)
+            return false;
         
-        yield return new WaitForSeconds(currentWeaponData.burstPostDelay);
-        _isCooldown = false;
+        Bullet bullet = _weaponPool.GetBullet(BulletPoolKey);
+
+        if (bullet == null)
+            return false;
+
+        // 이번 단계에서는 기존 Bullet 프리팹의 탄약 데이터를 사용
+        if (bullet.bulletData == null || bullet.bulletData.speed <= 0f)
+        {
+            bullet.ReturnToPool();
+            return false;
+        }
+
+        float baseSpread = Mathf.Max(0f, currentWeaponData.baseSpread);
+
+        float maximumSpread = Mathf.Max( baseSpread, currentWeaponData.maxSpread);
+
+        float shotSpread = Mathf.Clamp( CurrentSpread, baseSpread, maximumSpread);
+
+        float randomYaw = Random.Range(-shotSpread, shotSpread);
+
+        Quaternion spreadRotation = Quaternion.Euler(0f, randomYaw, 0f);
+
+        bullet.transform.SetPositionAndRotation( bulletSpawnPoint.position, bulletSpawnPoint.rotation * spreadRotation);
+
+        bullet.speed = bullet.bulletData.speed;
+        bullet.Init();
+
+        // 단발·연사·점사 모두 성공한 발사 시각을 기록합니다.
+        _lastFireTime = Time.time;
+
+        CurrentSpread = Mathf.Clamp( shotSpread + Mathf.Max(0f, currentWeaponData.bloomPerShot), baseSpread, maximumSpread);
+
+        PlayerNoise.Emit( this, bulletSpawnPoint.position, gunshotNoiseRadius, PlayerNoiseType.Gunshot);
+
+        if (crosshair != null)
+            crosshair.AddSpread(shotSpread);
+
+        if (_impulseSource != null)
+            _impulseSource.GenerateImpulse();
+
+        EjectCasing();
+
+        return true;
+    }
+
+    private void EjectCasing()
+    {
+        if (_weaponPool == null || bulletSpawnPoint == null)
+            return;
+
+        Casing casing = _weaponPool.GetCasing(CasingPoolKey);
+
+        // 탄피 연출이 없어도 이미 발사한 총알은 정상적으로 유지합니다.
+        if (casing == null)
+            return;
+
+        casing.transform.SetPositionAndRotation(
+            bulletSpawnPoint.position,
+            bulletSpawnPoint.rotation);
+
+        Vector3 ejectDirection =
+            (bulletSpawnPoint.right + bulletSpawnPoint.up).normalized;
+
+        casing.Eject(ejectDirection);
     }
 
     #endregion

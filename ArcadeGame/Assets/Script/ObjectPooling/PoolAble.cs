@@ -101,5 +101,9 @@ public class PoolAble : MonoBehaviour
         }
 
     }
+    public void ReturnToPool()
+    {
+        ReleaseObject();
+    }
     
 }
