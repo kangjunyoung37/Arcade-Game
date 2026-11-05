@@ -10,10 +10,6 @@ using Random = UnityEngine.Random;
 public class Character : MonoBehaviour
 {
 
-    private const string BulletPoolKey = "Bullet";
-    private const string CasingPoolKey = "Casing";
-    private const float SpreadRecoveryDelayMultiplier = 1.5f;
-
     [Header("CrossHair")]
     public Crosshair crosshair;
     public LayerMask groundLayer;
@@ -27,14 +23,6 @@ public class Character : MonoBehaviour
     public float runspeed = 12f;
     private float _currentSpeed = 8f;
     public float aimingSpeed = 4f;
-    
-    [Header("Shoot Settings")]
-    private float _lastFireTime = float.NegativeInfinity;
-
-    [Header("Shoot Test")]
-    public Transform bulletSpawnPoint;
-    public WeaponData currentWeaponData;
-    
     //조준시 카메라 설정
     [Header("Camera Aim")] 
     public Transform cameraTarget;
@@ -66,7 +54,7 @@ public class Character : MonoBehaviour
     private Camera mainCamera;
     private CharacterController _characterControllercc;
     private CinemachineImpulseSource _impulseSource;
-    private ObjectPoolManager _weaponPool;
+    private PlayerWeapon _playerWeapon;
     
     //Variable
     private bool _isAiming = false;
@@ -76,21 +64,30 @@ public class Character : MonoBehaviour
     private Vector3 _moveDirection;
     private float _rotateSpeed = 15f;
     private float _lastDodgeTime;
-
-    public float CurrentSpread { get; private set; }
-    public bool CanUseWeapon => isActiveAndEnabled &&_sceneReferencesBound && !_isRunning && !_isDodging && currentWeaponData != null;
+    public bool CanUseWeapon => isActiveAndEnabled &&_sceneReferencesBound && !_isRunning && !_isDodging;
 
     private void Awake()
     {
         _health = GetComponent<HealthSystem>();
         _characterControllercc = GetComponent<CharacterController>();
         _impulseSource = GetComponent<CinemachineImpulseSource>();
+        _playerWeapon = GetComponent<PlayerWeapon>();
         if (_health is not null)
         {
             _health.onDied += HandleDeath;
         }
     }
+    private void OnEnable()
+    {
+        if (_playerWeapon != null)
+            _playerWeapon.Fired += HandleWeaponFired;
+    }
 
+    private void OnDisable()
+    {
+        if (_playerWeapon != null)
+            _playerWeapon.Fired -= HandleWeaponFired;
+    }
     private void Start()
     {
         if (!_sceneReferencesBound)
@@ -101,11 +98,6 @@ public class Character : MonoBehaviour
             enabled = false;
             return;
         }
-        _weaponPool = ObjectPoolManager.instance;
-
-        if (currentWeaponData != null)
-            CurrentSpread = currentWeaponData.baseSpread;
-
         _lastFootstepPosition = transform.position;
     }
     
@@ -124,7 +116,6 @@ public class Character : MonoBehaviour
             CharacterMovement();
             HandleAimAndCamera();
         }
-        HandleSpreadRecovery();
         Dodge();
         RotateItem();
         UpdateFootstepNoise();
@@ -219,96 +210,7 @@ public class Character : MonoBehaviour
             cameraTarget.position = Vector3.Lerp(cameraTarget.position, targetCamPos, Time.deltaTime * aimCameraSpeed);
         }
     }
-
-    #region Fire Code
-
-    private void HandleSpreadRecovery()
-    {
-        if (currentWeaponData == null)
-            return;
-
-        float recoveryDelay = currentWeaponData.GetShotInterval(currentWeaponData.fireMode) * SpreadRecoveryDelayMultiplier;
-
-        if (Time.time < _lastFireTime + recoveryDelay)
-            return;
-
-        CurrentSpread = Mathf.MoveTowards(CurrentSpread, Mathf.Max(0f, currentWeaponData.baseSpread), Mathf.Max(0f, currentWeaponData.recoveryRate) * Time.deltaTime);
-    }
-
-    public bool TryFireWeapon()
-    {
-        if (!CanUseWeapon || bulletSpawnPoint == null || _weaponPool == null || !_weaponPool.IsReady || GameManager.Instance == null)
-            return false;
-        
-        Bullet bullet = _weaponPool.GetBullet(BulletPoolKey);
-
-        if (bullet == null)
-            return false;
-
-        // 이번 단계에서는 기존 Bullet 프리팹의 탄약 데이터를 사용
-        if (bullet.bulletData == null || bullet.bulletData.speed <= 0f)
-        {
-            bullet.ReturnToPool();
-            return false;
-        }
-
-        float baseSpread = Mathf.Max(0f, currentWeaponData.baseSpread);
-
-        float maximumSpread = Mathf.Max( baseSpread, currentWeaponData.maxSpread);
-
-        float shotSpread = Mathf.Clamp( CurrentSpread, baseSpread, maximumSpread);
-
-        float randomYaw = Random.Range(-shotSpread, shotSpread);
-
-        Quaternion spreadRotation = Quaternion.Euler(0f, randomYaw, 0f);
-
-        bullet.transform.SetPositionAndRotation( bulletSpawnPoint.position, bulletSpawnPoint.rotation * spreadRotation);
-
-        bullet.speed = bullet.bulletData.speed;
-        bullet.Init();
-
-        // 단발·연사·점사 모두 성공한 발사 시각을 기록합니다.
-        _lastFireTime = Time.time;
-
-        CurrentSpread = Mathf.Clamp( shotSpread + Mathf.Max(0f, currentWeaponData.bloomPerShot), baseSpread, maximumSpread);
-
-        PlayerNoise.Emit( this, bulletSpawnPoint.position, gunshotNoiseRadius, PlayerNoiseType.Gunshot);
-
-        if (crosshair != null)
-            crosshair.AddSpread(shotSpread);
-
-        if (_impulseSource != null)
-            _impulseSource.GenerateImpulse();
-
-        EjectCasing();
-
-        return true;
-    }
-
-    private void EjectCasing()
-    {
-        if (_weaponPool == null || bulletSpawnPoint == null)
-            return;
-
-        Casing casing = _weaponPool.GetCasing(CasingPoolKey);
-
-        // 탄피 연출이 없어도 이미 발사한 총알은 정상적으로 유지합니다.
-        if (casing == null)
-            return;
-
-        casing.transform.SetPositionAndRotation(
-            bulletSpawnPoint.position,
-            bulletSpawnPoint.rotation);
-
-        Vector3 ejectDirection =
-            (bulletSpawnPoint.right + bulletSpawnPoint.up).normalized;
-
-        casing.Eject(ejectDirection);
-    }
-
-    #endregion
-   
-    
+  
     //Dodge
     #region Dodge
 
@@ -381,35 +283,49 @@ public class Character : MonoBehaviour
         }
     }
 
-private void UpdateFootstepNoise()
-{
-    Vector3 currentPosition = transform.position;
-    Vector3 displacement = currentPosition - _lastFootstepPosition;
-    _lastFootstepPosition = currentPosition;
-
-    if (!_characterControllercc.isGrounded || _isDodging)
+    private void UpdateFootstepNoise()
     {
-        _accumulatedFootstepDistance = 0f;
-        return;
+        Vector3 currentPosition = transform.position;
+        Vector3 displacement = currentPosition - _lastFootstepPosition;
+        _lastFootstepPosition = currentPosition;
+
+        if (!_characterControllercc.isGrounded || _isDodging)
+        {
+            _accumulatedFootstepDistance = 0f;
+            return;
+        }
+
+        displacement.y = 0f;
+
+        _accumulatedFootstepDistance += displacement.magnitude;
+
+        if (_accumulatedFootstepDistance < footstepDistance)
+        {
+            return;
+        }
+
+        _accumulatedFootstepDistance %= footstepDistance;
+
+        float radius = _isRunning
+            ? runNoiseRadius
+            : walkNoiseRadius;
+
+        PlayerNoise.Emit(this, currentPosition, radius, PlayerNoiseType.Footstep);
     }
-
-    displacement.y = 0f;
-
-    _accumulatedFootstepDistance += displacement.magnitude;
-
-    if (_accumulatedFootstepDistance < footstepDistance)
+    private void HandleWeaponFired(Vector3 shotPosition, float shotSpread)
     {
-        return;
+        PlayerNoise.Emit(
+            this,
+            shotPosition,
+            gunshotNoiseRadius,
+            PlayerNoiseType.Gunshot);
+
+        if (crosshair != null)
+            crosshair.AddSpread(shotSpread);
+
+        if (_impulseSource != null)
+            _impulseSource.GenerateImpulse();
     }
-
-    _accumulatedFootstepDistance %= footstepDistance;
-
-    float radius = _isRunning
-        ? runNoiseRadius
-        : walkNoiseRadius;
-
-    PlayerNoise.Emit(this, currentPosition, radius, PlayerNoiseType.Footstep);
-}
     private void HandleDeath()
     {
         Debug.Log("죽음");

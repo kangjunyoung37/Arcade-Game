@@ -2,7 +2,7 @@ using UnityEngine;
 
 [DefaultExecutionOrder(100)]
 [DisallowMultipleComponent]
-[RequireComponent(typeof(Character))]
+[RequireComponent(typeof(Character), typeof(PlayerWeapon))]
 public sealed class PlayerWeaponController : MonoBehaviour
 {
     private const int FireMouseButton = 0;
@@ -10,23 +10,27 @@ public sealed class PlayerWeaponController : MonoBehaviour
     private Character _owner;
     private WeaponData _weapon;
     private FireMode _mode;
-
+    private PlayerWeapon _playerWeapon;
     private int _remainingBurstShots;
     private float _nextShotTime = float.NegativeInfinity;
 
     private void Awake()
     {
-        if (!TryGetComponent(out _owner))
+        if (!TryGetComponent(out _owner) || !TryGetComponent(out _playerWeapon))
             enabled = false;
+        
     }
 
     private void Update()
     {
-        if (_owner == null)
-            return;
-
         float now = Time.time;
-        WeaponData currentWeapon = _owner.currentWeaponData;
+
+        if (_owner == null || _playerWeapon == null)
+        {
+            CancelBurst(now);
+            return;
+        }
+        WeaponData currentWeapon = _playerWeapon.Data;
 
         // 무기 또는 발사 모드가 바뀌면 진행 중인 점사를 취소합니다.
         if (currentWeapon != _weapon || (currentWeapon != null && currentWeapon.fireMode != _mode))
@@ -39,7 +43,7 @@ public sealed class PlayerWeaponController : MonoBehaviour
                 _mode = _weapon.fireMode;
         }
 
-        if (_weapon == null || !_owner.CanUseWeapon)
+        if (_weapon == null || !_owner.CanUseWeapon || !_playerWeapon.isActiveAndEnabled)
         {
             CancelBurst(now);
             return;
@@ -84,7 +88,7 @@ public sealed class PlayerWeaponController : MonoBehaviour
     private void TryExecuteShot(float now)
     {
         // 실제 발사에 실패하면 남은 점사도 취소합니다.
-        if (!_owner.TryFireWeapon())
+        if (!_playerWeapon.TryFire())
         {
             CancelBurst(now);
             return;
