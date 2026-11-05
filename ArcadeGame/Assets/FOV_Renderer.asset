@@ -15,7 +15,7 @@ MonoBehaviour:
   m_Active: 1
   blurShader: {fileID: 4800000, guid: 0ec91324a6da9f24e953c73c11dee677, type: 3}
   targetMask: {fileID: 8400000, guid: 9945723b94a2bfa45a384fdeec67a1f2, type: 2}
-  sigma: 12
+  sigma: 16
 --- !u!114 &-6966610088217496626
 MonoBehaviour:
   m_ObjectHideFlags: 0

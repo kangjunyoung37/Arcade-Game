@@ -13,14 +13,22 @@ MonoBehaviour:
   m_Name: TestWeapon
   m_EditorClassIdentifier: 
   weaponName: 
+  category: 0
+  caliber: {fileID: 11400000, guid: 03b52885dbe2f084fb7a540cf11ce0ca, type: 2}
+  actionType: 0
   fireMode: 1
+  additionalFireModes: 
   fireRate: 0.1
   singleFireDelay: 0.2
-  burstPostDelay: 0.5
+  burstShotInterval: 0.1
   burstCount: 3
+  burstPostDelay: 0.5
+  actionCycleTime: 0.8
   baseSpread: 0.2
   maxSpread: 10
   bloomPerShot: 0.2
   recoveryRate: 10
-  reloadTime: 0
-  magazineSize: 0
+  reloadType: 0
+  magazineSize: 1
+  reloadTime: 0.02
+  insertRoundTime: 0.6
