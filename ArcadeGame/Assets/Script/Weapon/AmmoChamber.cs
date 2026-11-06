@@ -85,5 +85,15 @@ public sealed class AmmoChamber
         State = ChamberState.Empty;
         return true;
     }
-    
+    //실탄을 소비하지 않고 약실에 들어 있는 탄약을 확인합니다.
+    public bool TryPeekLoadedRound(out BulletData ammo)
+    {
+        ammo = null;
+
+        if (!HasLiveRound)
+            return false;
+
+        ammo = _loadedRound;
+        return true;
+    }
 }

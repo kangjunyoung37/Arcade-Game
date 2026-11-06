@@ -18,11 +18,26 @@ public sealed class PlayerWeapon : MonoBehaviour
 
     private ObjectPoolManager _pool;
     private WeaponData _trackedWeapon;
+    private AmmoMagazine _equippedMagazine;
+    private AmmoChamber _chamber;
+    private WeaponData _initializedWeapon;
 
     private float _lastFireTime = float.NegativeInfinity;
 
     public WeaponData Data => weaponData;
     public float CurrentSpread { get; private set; }
+    public bool HasMagazine => _equippedMagazine != null;
+
+    public int MagazineCount => _equippedMagazine != null ? _equippedMagazine.Count : 0;
+
+    public int ChamberCount => _chamber != null && _chamber.HasLiveRound ? 1 : 0;
+
+    public int TotalLoadedRounds => MagazineCount + ChamberCount;
+
+    //탄창이 바뀌었음을 입력 컨트롤러가 감지할 때 사용합니다.
+    public uint MagazineRevision { get; private set; }
+
+    private bool CanOperateAmmo => isActiveAndEnabled && weaponData != null && weaponData == _initializedWeapon && _chamber != null && weaponData.caliber == _chamber.Caliber && weaponData.actionType == WeaponActionType.SelfLoading && weaponData.reloadType == WeaponReloadType.MagazineSwap;
 
     // 발사 위치, 이번 발사에 사용한 탄퍼짐
     public event Action<Vector3, float> Fired;
@@ -30,6 +45,17 @@ public sealed class PlayerWeapon : MonoBehaviour
     private void Awake()
     {
         SynchronizeWeaponData();
+        if (weaponData == null || weaponData.caliber == null || weaponData.actionType != WeaponActionType.SelfLoading || weaponData.reloadType != WeaponReloadType.MagazineSwap)
+        {
+        #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                Debug.LogError("구경이 설정된 SelfLoading / MagazineSwap 무기가 필요합니다.", this);
+        #endif
+            enabled = false;
+            return;
+        }
+
+        _initializedWeapon = weaponData;
+        _chamber = new AmmoChamber(weaponData.caliber);
     }
 
     private void Start()
@@ -140,5 +166,59 @@ public sealed class PlayerWeapon : MonoBehaviour
 
         Vector3 ejectDirection = (ejectPoint.right + ejectPoint.up).normalized;
         casing.Eject(ejectDirection);
+    }
+    /// <summary>
+    /// 외부 보관 슬롯과 무기의 탄창을 맞바꿉니다.
+    ///
+    /// 성공:
+    /// - incomingSlot의 탄창이 무기에 장착됩니다.
+    /// - 기존 장착 탄창은 incomingSlot으로 돌아갑니다.
+    ///
+    /// incomingSlot이 null이면 장착된 탄창을 제거합니다.
+    /// 실패하면 양쪽 상태를 변경하지 않습니다.
+    /// </summary>
+    public bool TryExchangeMagazine(ref AmmoMagazine incomingSlot)
+    {
+        if (!CanOperateAmmo)
+            return false;
+
+        // 같은 탄창을 다시 넣거나 양쪽 모두 비어 있으면 변경하지 않습니다.
+        if (ReferenceEquals(incomingSlot, _equippedMagazine))
+            return false;
+
+        if (incomingSlot != null && incomingSlot.Caliber != _chamber.Caliber)
+        {
+            return false;
+        }
+
+        AmmoMagazine previousMagazine = _equippedMagazine;
+
+        _equippedMagazine = incomingSlot;
+        incomingSlot = previousMagazine;
+
+        unchecked
+        {
+            MagazineRevision++;
+        }
+
+        // 약실은 건드리지 않습니다.
+        // 탄창을 교체했다고 자동으로 탄약을 추가하지도 않습니다.
+        return true;
+    }
+
+    /// <summary>
+    /// 약실이 비어 있을 때 장착된 탄창에서 한 발을 공급합니다.
+    /// 이미 실탄이 있으면 그대로 유지하고 false를 반환합니다.
+    /// </summary>
+    public bool TryChamberRound()
+    {
+        if (!CanOperateAmmo ||
+            !_chamber.IsEmpty ||
+            _equippedMagazine == null)
+        {
+            return false;
+        }
+
+        return _chamber.TryFeedFromMagazine(_equippedMagazine);
     }
 }
