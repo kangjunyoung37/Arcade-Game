@@ -12,6 +12,7 @@ public sealed class PlayerWeaponController : MonoBehaviour
     private FireMode _mode;
     private PlayerWeapon _playerWeapon;
     private int _remainingBurstShots;
+    private uint _observedMagazineRevision;
     private float _nextShotTime = float.NegativeInfinity;
 
     private void Awake()
@@ -30,6 +31,13 @@ public sealed class PlayerWeaponController : MonoBehaviour
             CancelBurst(now);
             return;
         }
+
+        if (_observedMagazineRevision != _playerWeapon.MagazineRevision)
+        {
+            CancelBurst(now);
+            _observedMagazineRevision = _playerWeapon.MagazineRevision;
+        }
+        
         WeaponData currentWeapon = _playerWeapon.Data;
 
         // 무기 또는 발사 모드가 바뀌면 진행 중인 점사를 취소합니다.

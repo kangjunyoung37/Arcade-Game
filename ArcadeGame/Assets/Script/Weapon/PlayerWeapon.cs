@@ -101,20 +101,24 @@ public sealed class PlayerWeapon : MonoBehaviour
     // 실제 총알 한 발을 발사합니다.
     public bool TryFire()
     {
-        if (!isActiveAndEnabled ||Time.deltaTime <= 0f || weaponData == null || muzzle == null || _pool == null || !_pool.IsReady || GameManager.Instance == null)
+        if (!CanOperateAmmo || Time.deltaTime <= 0f || muzzle == null || _pool == null || !_pool.IsReady || GameManager.Instance == null)
             return false;
         
-        SynchronizeWeaponData();
+        // 탄창이 없어도 약실에 실탄이 있으면 발사할 수 있습니다.
+        if (!_chamber.TryPeekLoadedRound(out BulletData ammo))
+            return false;
 
+        // 이번 단계는 탄약 한 발당 투사체 하나만 지원합니다.
+        if (!weaponData.IsAmmoCompatible(ammo) || ammo.speed <= 0f || ammo.projectilesPerRound != 1)
+            return false;
+        
+        // 풀에서 가져오지 못했다면 약실의 탄약은 그대로 유지됩니다.
         Bullet bullet = _pool.GetBullet(BulletPoolKey);
 
         if (bullet == null)
             return false;
 
-        // 이번 단계는 기존 Bullet 프리팹의 탄약 데이터를 사용합니다.
-        BulletData ammo = bullet.bulletData;
-
-        if (ammo == null || ammo.speed <= 0f)
+        if (!_chamber.TryConsumeRound(out BulletData firedAmmo))
         {
             bullet.ReturnToPool();
             return false;
@@ -125,22 +129,32 @@ public sealed class PlayerWeapon : MonoBehaviour
 
         float shotSpread = Mathf.Clamp(CurrentSpread, baseSpread, maximumSpread);
 
-        float randomYaw = UnityEngine.Random.Range(-shotSpread, shotSpread);
+        float randomYaw = UnityEngine.Random.Range( -shotSpread, shotSpread);
 
         Vector3 shotPosition = muzzle.position;
 
         Quaternion shotRotation = muzzle.rotation * Quaternion.Euler(0f, randomYaw, 0f);
 
-        bullet.transform.SetPositionAndRotation(shotPosition, shotRotation);
+        bullet.transform.SetPositionAndRotation( shotPosition, shotRotation );
 
-        bullet.speed = ammo.speed;
+        // 풀에서 재사용한 총알에도 실제 소비한 탄약을 매번 적용합니다.
+        bullet.bulletData = firedAmmo;
+        bullet.speed = firedAmmo.speed;
         bullet.Init();
 
         _lastFireTime = Time.time;
 
-        CurrentSpread = Mathf.Clamp(shotSpread + Mathf.Max(0f, weaponData.bloomPerShot),baseSpread,maximumSpread);
+        CurrentSpread = Mathf.Clamp( shotSpread + Mathf.Max(0f, weaponData.bloomPerShot), baseSpread, maximumSpread);
 
-        EjectCasing();
+        //탄피 배출 후 다음 실탄 공급.
+        bool ejected = _chamber.TryEject(out _);
+
+        // 탄창이 없거나 비었다면 약실은 빈 상태로 남습니다.
+        _chamber.TryFeedFromMagazine(_equippedMagazine);
+
+        if (ejected)
+            EjectCasing();
+
         Fired?.Invoke(shotPosition, shotSpread);
         return true;
     }
@@ -168,28 +182,27 @@ public sealed class PlayerWeapon : MonoBehaviour
         casing.Eject(ejectDirection);
     }
     /// <summary>
-    /// 외부 보관 슬롯과 무기의 탄창을 맞바꿉니다.
+    /// 외부 보관 슬롯과 무기의 탄창을 맞바꿉니다
     ///
     /// 성공:
-    /// - incomingSlot의 탄창이 무기에 장착됩니다.
-    /// - 기존 장착 탄창은 incomingSlot으로 돌아갑니다.
+    /// - incomingSlot의 탄창이 무기에 장착됩니다
+    /// - 기존 장착 탄창은 incomingSlot으로 돌아갑니다
     ///
-    /// incomingSlot이 null이면 장착된 탄창을 제거합니다.
-    /// 실패하면 양쪽 상태를 변경하지 않습니다.
+    /// incomingSlot이 null이면 장착된 탄창을 제거합니다
+    /// 실패하면 양쪽 상태를 변경하지 않습니다
     /// </summary>
     public bool TryExchangeMagazine(ref AmmoMagazine incomingSlot)
     {
         if (!CanOperateAmmo)
             return false;
 
-        // 같은 탄창을 다시 넣거나 양쪽 모두 비어 있으면 변경하지 않습니다.
+        // 같은 탄창을 다시 넣거나 양쪽 모두 비어 있으면 변경하지 않습니다
         if (ReferenceEquals(incomingSlot, _equippedMagazine))
             return false;
 
         if (incomingSlot != null && incomingSlot.Caliber != _chamber.Caliber)
-        {
             return false;
-        }
+        
 
         AmmoMagazine previousMagazine = _equippedMagazine;
 
@@ -201,23 +214,18 @@ public sealed class PlayerWeapon : MonoBehaviour
             MagazineRevision++;
         }
 
-        // 약실은 건드리지 않습니다.
-        // 탄창을 교체했다고 자동으로 탄약을 추가하지도 않습니다.
+        // 탄창을 교체했다고 자동으로 탄약을 추가하지 않습니다
         return true;
     }
 
-    /// <summary>
-    /// 약실이 비어 있을 때 장착된 탄창에서 한 발을 공급합니다.
-    /// 이미 실탄이 있으면 그대로 유지하고 false를 반환합니다.
-    /// </summary>
+  
+    //약실이 비어 있을 때 장착된 탄창에서 한 발을 공급
+    //이미 실탄이 있으면 그대로 유지하고 false를 반환
     public bool TryChamberRound()
     {
-        if (!CanOperateAmmo ||
-            !_chamber.IsEmpty ||
-            _equippedMagazine == null)
-        {
+        if (!CanOperateAmmo || !_chamber.IsEmpty || _equippedMagazine == null)
             return false;
-        }
+        
 
         return _chamber.TryFeedFromMagazine(_equippedMagazine);
     }
