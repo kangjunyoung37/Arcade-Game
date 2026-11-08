@@ -30,5 +30,5 @@ MonoBehaviour:
   recoveryRate: 10
   reloadType: 0
   magazineSize: 3
-  reloadTime: 2
+  reloadTime: 3
   insertRoundTime: 0.6

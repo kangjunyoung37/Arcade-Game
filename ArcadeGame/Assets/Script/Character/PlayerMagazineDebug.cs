@@ -17,6 +17,7 @@ public sealed class PlayerMagazineDebug : MonoBehaviour
     // 테스트용 인벤토리 슬롯 두 개입니다.
     private AmmoMagazine _spareMagazine;
     private AmmoMagazine _removedMagazine;
+    private MagazineSlot _spareSlot;
 
     private bool _ready;
 
@@ -80,29 +81,39 @@ public sealed class PlayerMagazineDebug : MonoBehaviour
         for (int i = 0; i < InitialRoundsB; i++)
             supply.TryLoadOneInto(_spareMagazine);
 
+        // 탄창을 슬롯으로 이동합니다.
+        // 이 호출 뒤 _spareMagazine은 null입니다.
+        _spareSlot = new MagazineSlot(ref _spareMagazine);
+
         _ready = true;
         PrintState();
     }
 
-    [ContextMenu("Debug/Exchange Spare Magazine")]
+    [ContextMenu("Debug/Start Timed Reload")]
     private void ExchangeSpareMagazine()
+    {
+        if (!Application.isPlaying ||
+            !_ready ||
+            _spareSlot == null)
+        {
+            return;
+        }
+
+        bool started = _weapon.TryStartReload(_spareSlot);
+
+        Debug.Log($"재장전 시작 성공: {started}", this);
+        PrintState();
+    }
+    [ContextMenu("Debug/Cancel Reload")]
+    private void CancelReload()
     {
         if (!Application.isPlaying || !_ready)
             return;
 
-        if (_spareMagazine == null)
-        {
-            Debug.LogWarning("예비 슬롯에 탄창이 없습니다.", this);
-            return;
-        }
-
-        bool changed =
-            _weapon.TryExchangeMagazine(ref _spareMagazine);
-
-        Debug.Log($"탄창 교체 성공: {changed}", this);
+        _weapon.CancelReload();
         PrintState();
     }
-
+    
     [ContextMenu("Debug/Remove Magazine")]
     private void RemoveMagazine()
     {
@@ -155,14 +166,14 @@ public sealed class PlayerMagazineDebug : MonoBehaviour
         PrintState();
     }
 
-    [ContextMenu("Debug/Print Ammo State")]
+  [ContextMenu("Debug/Print Ammo State")]
     private void PrintState()
     {
         if (!Application.isPlaying || !_ready)
             return;
 
         int spareCount =
-            _spareMagazine != null ? _spareMagazine.Count : 0;
+            _spareSlot != null ? _spareSlot.RoundCount : 0;
 
         int removedCount =
             _removedMagazine != null ? _removedMagazine.Count : 0;
@@ -170,7 +181,13 @@ public sealed class PlayerMagazineDebug : MonoBehaviour
         int total =
             _weapon.TotalLoadedRounds + spareCount + removedCount;
 
+        bool reserved =
+            _spareSlot != null && _spareSlot.IsReserved;
+
         Debug.Log(
+            $"재장전 중: {_weapon.IsReloading}, " +
+            $"진행률: {_weapon.ReloadProgress:P0}, " +
+            $"예비 슬롯 예약: {reserved}, " +
             $"탄창 장착: {_weapon.HasMagazine}, " +
             $"장착 탄창: {_weapon.MagazineCount}, " +
             $"약실: {_weapon.ChamberCount}, " +

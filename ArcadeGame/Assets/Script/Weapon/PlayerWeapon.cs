@@ -18,14 +18,17 @@ public sealed class PlayerWeapon : MonoBehaviour
 
     private ObjectPoolManager _pool;
     private WeaponData _trackedWeapon;
+    private MagazineSlot _reloadSlot;
     private AmmoMagazine _equippedMagazine;
     private AmmoChamber _chamber;
     private WeaponData _initializedWeapon;
 
     private float _lastFireTime = float.NegativeInfinity;
-
+    private float _reloadDuration;
+    private float _remainingReloadTime;
     public WeaponData Data => weaponData;
     public float CurrentSpread { get; private set; }
+    public float ReloadProgress => IsReloading && _reloadDuration > 0f ? Mathf.Clamp01(1f - _remainingReloadTime / _reloadDuration) : 0f;
     public bool HasMagazine => _equippedMagazine != null;
 
     public int MagazineCount => _equippedMagazine != null ? _equippedMagazine.Count : 0;
@@ -33,6 +36,8 @@ public sealed class PlayerWeapon : MonoBehaviour
     public int ChamberCount => _chamber != null && _chamber.HasLiveRound ? 1 : 0;
 
     public int TotalLoadedRounds => MagazineCount + ChamberCount;
+
+    public bool IsReloading => _reloadSlot != null;
 
     //탄창이 바뀌었음을 입력 컨트롤러가 감지할 때 사용합니다.
     public uint MagazineRevision { get; private set; }
@@ -101,7 +106,7 @@ public sealed class PlayerWeapon : MonoBehaviour
     // 실제 총알 한 발을 발사합니다.
     public bool TryFire()
     {
-        if (!CanOperateAmmo || Time.deltaTime <= 0f || muzzle == null || _pool == null || !_pool.IsReady || GameManager.Instance == null)
+        if (!CanOperateAmmo || IsReloading || Time.deltaTime <= 0f || muzzle == null || _pool == null || !_pool.IsReady || GameManager.Instance == null)
             return false;
         
         // 탄창이 없어도 약실에 실탄이 있으면 발사할 수 있습니다.
@@ -193,7 +198,7 @@ public sealed class PlayerWeapon : MonoBehaviour
     /// </summary>
     public bool TryExchangeMagazine(ref AmmoMagazine incomingSlot)
     {
-        if (!CanOperateAmmo)
+        if (!CanOperateAmmo || IsReloading)
             return false;
 
         // 같은 탄창을 다시 넣거나 양쪽 모두 비어 있으면 변경하지 않습니다
@@ -223,10 +228,128 @@ public sealed class PlayerWeapon : MonoBehaviour
     //이미 실탄이 있으면 그대로 유지하고 false를 반환
     public bool TryChamberRound()
     {
-        if (!CanOperateAmmo || !_chamber.IsEmpty || _equippedMagazine == null)
+        if (!CanOperateAmmo || IsReloading || !_chamber.IsEmpty || _equippedMagazine == null)
             return false;
         
 
         return _chamber.TryFeedFromMagazine(_equippedMagazine);
     }
+    /// <summary>
+/// 지정한 슬롯의 탄창으로 재장전을 시작합니다.
+/// 이 시점에는 탄창이나 약실을 변경하지 않습니다.
+/// </summary>
+public bool TryStartReload(MagazineSlot sourceSlot)
+{
+    if (!CanOperateAmmo ||
+        IsReloading ||
+        Time.timeScale <= 0f ||
+        sourceSlot == null ||
+        !sourceSlot.HasMagazine)
+    {
+        return false;
+    }
+
+    AmmoMagazine incomingMagazine = sourceSlot.Magazine;
+
+    if (ReferenceEquals(incomingMagazine, _equippedMagazine) ||
+        incomingMagazine.Caliber != _chamber.Caliber)
+    {
+        return false;
+    }
+
+    if (!sourceSlot.TryReserve(this))
+        return false;
+
+    _reloadSlot = sourceSlot;
+
+    // 시작 시 시간을 확정합니다.
+    _reloadDuration = Mathf.Max(
+        WeaponData.MinimumShotInterval,
+        weaponData.reloadTime);
+
+    _remainingReloadTime = _reloadDuration;
+    return true;
+}
+
+
+    // 재장전 시간을 진행합니다.
+    public void TickReload(float deltaTime)
+    {
+        if (!IsReloading)
+            return;
+
+        if (!CanOperateAmmo)
+        {
+            CancelReload();
+            return;
+        }
+
+        if (deltaTime <= 0f)
+            return;
+
+        _remainingReloadTime = Mathf.Max(0f, _remainingReloadTime - deltaTime);
+
+        if (_remainingReloadTime > 0f)
+            return;
+
+        CompleteReload();
+    }
+
+
+    // 완료 시점에 탄창 교환을 한 번만 적용합니다.
+    private void CompleteReload()
+    {
+        MagazineSlot slot = _reloadSlot;
+
+        if (slot == null)
+            return;
+
+        AmmoMagazine incomingMagazine = slot.Magazine;
+
+        // 시작 이후 설정이 변경된 경우에도 다시 검사합니다.
+        if (!CanOperateAmmo || incomingMagazine == null || incomingMagazine.Caliber != _chamber.Caliber || ReferenceEquals(incomingMagazine, _equippedMagazine))
+        {
+            CancelReload();
+            return;
+        }
+
+        // 새 탄창은 무기로, 기존 탄창은 같은 슬롯으로 이동합니다.
+        if (!slot.TryExchangeReserved(this, ref _equippedMagazine))
+        {
+            CancelReload();
+            return;
+        }
+
+        // 약실에 실탄이 있으면 그대로 유지합니다.
+        // 비어 있을 때만 새 탄창에서 한 발을 공급합니다.
+        if (_chamber.IsEmpty)
+            _chamber.TryFeedFromMagazine(_equippedMagazine);
+
+        unchecked
+        {
+            MagazineRevision++;
+        }
+
+        // 완료된 작업의 예약과 타이머를 정리합니다.
+        CancelReload();
+    }
+
+
+    // 탄창을 변경하지 않고 예약과 진행 상태만 해제합니다.
+    // 완료 전에는 실제 교환을 하지 않았으므로 되돌릴 탄창도 없습니다
+    public void CancelReload()
+    {
+        if (_reloadSlot != null)
+            _reloadSlot.ReleaseReservation(this);
+
+        _reloadSlot = null;
+        _reloadDuration = 0f;
+        _remainingReloadTime = 0f;
+    }
+    
+    private void OnDisable()
+    {
+        CancelReload();
+    }
+
 }

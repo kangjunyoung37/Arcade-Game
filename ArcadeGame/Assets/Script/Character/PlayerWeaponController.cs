@@ -29,6 +29,8 @@ public sealed class PlayerWeaponController : MonoBehaviour
         if (_owner == null || _playerWeapon == null)
         {
             CancelBurst(now);
+            if (_playerWeapon != null)
+            _playerWeapon.CancelReload();
             return;
         }
 
@@ -44,16 +46,26 @@ public sealed class PlayerWeaponController : MonoBehaviour
         if (currentWeapon != _weapon || (currentWeapon != null && currentWeapon.fireMode != _mode))
         {
             CancelBurst(now);
-
+            _playerWeapon.CancelReload();
             _weapon = currentWeapon;
 
             if (_weapon != null)
                 _mode = _weapon.fireMode;
         }
+        
 
         if (_weapon == null || !_owner.CanUseWeapon || !_playerWeapon.isActiveAndEnabled)
         {
             CancelBurst(now);
+            _playerWeapon.CancelReload();
+            return;
+        }
+        
+        // 재장전 중에는 기존 점사를 취소하고 입력 처리를 중단합니다.
+        if (_playerWeapon.IsReloading)
+        {
+            CancelBurst(now);
+            _playerWeapon.TickReload(Time.deltaTime);
             return;
         }
 
@@ -131,5 +143,7 @@ public sealed class PlayerWeaponController : MonoBehaviour
     private void OnDisable()
     {
         CancelBurst(Time.time);
+        if (_playerWeapon != null)
+            _playerWeapon.CancelReload();
     }
 }
