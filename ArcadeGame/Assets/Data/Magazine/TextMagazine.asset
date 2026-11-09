@@ -1,0 +1,21 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 361c9109fe705524d85a4dad31e3961d, type: 3}
+  m_Name: TextMagazine
+  m_EditorClassIdentifier: 
+  displayName: "\uD14C\uC2A4\uD2B8 \uB77C\uC774\uD50C 30\uBC1C \uD0C4\uCC3D"
+  icon: {fileID: 0}
+  caliber: {fileID: 11400000, guid: 03b52885dbe2f084fb7a540cf11ce0ca, type: 2}
+  pattern: {fileID: 11400000, guid: 5b7da73370e5cbb44b7ff0326029bb01, type: 2}
+  capacity: 30
+  gridWidth: 1
+  gridHeight: 2

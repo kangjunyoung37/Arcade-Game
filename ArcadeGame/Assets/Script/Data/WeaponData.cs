@@ -43,6 +43,9 @@ public class WeaponData : ScriptableObject
 
     [Header("Ammunition Compatibility")]
     public AmmoCaliberData caliber;
+    
+    [Header("Magazine Compatibility")]
+    public MagazinePatternData magazinePattern;     
 
     [Header("Weapon Action")]
     public WeaponActionType actionType = WeaponActionType.SelfLoading;
@@ -130,6 +133,15 @@ public class WeaponData : ScriptableObject
     public float GetCycleCooldown(FireMode mode)
     {
         return mode == FireMode.Burst ? Mathf.Max(MinimumShotInterval, burstPostDelay) : GetShotInterval(mode);
+    }
+
+    // 탄약 구경과 탄창 장착 규격을 모두 검사합니다.
+    public bool IsMagazineCompatible(MagazineData magazine)
+    {
+        if (reloadType != WeaponReloadType.MagazineSwap || magazine == null || !magazine.IsValid || caliber == null || magazinePattern == null)
+            return false;
+        
+        return magazine.Caliber == caliber && magazine.Pattern == magazinePattern;
     }
 #if UNITY_EDITOR
     private void OnValidate()

@@ -15,6 +15,7 @@ MonoBehaviour:
   weaponName: 
   category: 0
   caliber: {fileID: 11400000, guid: 03b52885dbe2f084fb7a540cf11ce0ca, type: 2}
+  magazinePattern: {fileID: 11400000, guid: 5b7da73370e5cbb44b7ff0326029bb01, type: 2}
   actionType: 0
   fireMode: 1
   additionalFireModes: 
