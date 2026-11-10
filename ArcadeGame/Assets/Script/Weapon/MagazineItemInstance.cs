@@ -6,6 +6,7 @@ using System;
 public sealed class MagazineItemInstance
 {
     private readonly AmmoMagazine _ammo;
+    public event Action Changed;
 
     public Guid InstanceId { get; }
     public MagazineData Data { get; }
@@ -39,7 +40,11 @@ public sealed class MagazineItemInstance
         if (source == null)
             return false;
 
-        return source.TryLoadOneInto(_ammo);
+        if (!source.TryLoadOneInto(_ammo))
+            return false;
+
+        Changed?.Invoke();
+        return true;
     }
 
     // 다음에 공급될 탄약을 소비하지 않고 확인합니다.
