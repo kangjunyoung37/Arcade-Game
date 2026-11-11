@@ -10,7 +10,8 @@ public sealed class MagazineItemInstance
 
     public Guid InstanceId { get; }
     public MagazineData Data { get; }
-
+    public int GridWidth { get; }
+    public int GridHeight { get; }
     public int RoundCount => _ammo.Count;
     public int Capacity => _ammo.Capacity;
 
@@ -28,7 +29,8 @@ public sealed class MagazineItemInstance
 
         InstanceId = Guid.NewGuid();
         Data = data;
-
+        GridWidth = data.GridWidth;
+        GridHeight = data.GridHeight;
         // 실제 탄약 보관 공간은 탄창마다 별도로 생성합니다.
         _ammo = new AmmoMagazine(data.Caliber, data.Capacity);
     }
