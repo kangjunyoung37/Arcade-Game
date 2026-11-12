@@ -29,7 +29,7 @@ public class ItemDrag : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDrag
     private int _previewWidth;
     private int _previewHeight;
 
-    private Vector2 _grabOffset;
+    private Vector2 _dragPointerLocal;
     private float _savedAlpha;
     private bool _savedBlocksRaycasts;
 
@@ -104,6 +104,22 @@ public class ItemDrag : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDrag
         _canvasGroup.blocksRaycasts = true;
     }
 
+
+    // 아이템 RectTransform의 중심을 마우스 위치에 맞춥니다.
+    // Pivot은 변경하지 않아 기존 그리드 배치 계산을 유지합니다.
+    private void AlignCenterToPointer(Vector2 localPointer)
+    {
+        if (dragLayer == null || _rect == null)
+            return;
+
+        _dragPointerLocal = localPointer;
+
+        Vector3 pointerWorld = dragLayer.TransformPoint(new Vector3(localPointer.x, localPointer.y, 0f));
+
+        // Pivot에서 사각형 중심까지의 월드 공간 오프셋입니다.
+        Vector3 centerOffset = _rect.TransformVector((Vector3)_rect.rect.center);
+        _rect.position = pointerWorld - centerOffset;
+    }
     public void OnBeginDrag(PointerEventData eventData)
     {
         if (eventData.button != PointerEventData.InputButton.Left || CurrrentlyDraggedItem != null || !IsPlaced || _myGrid == null || dragLayer == null || !dragLayer.gameObject.activeInHierarchy)
@@ -132,7 +148,7 @@ public class ItemDrag : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDrag
         _rect.SetParent(dragLayer, true);
         _rect.SetAsLastSibling();
 
-        _grabOffset = (Vector2)dragLayer.InverseTransformPoint(_rect.position) - localPointer;
+        AlignCenterToPointer(localPointer);
 
         _canvasGroup.alpha = DragAlpha;
         _canvasGroup.blocksRaycasts = false;
@@ -145,7 +161,7 @@ public class ItemDrag : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDrag
 
         if (RectTransformUtility.ScreenPointToLocalPointInRectangle( dragLayer, eventData.position, eventData.pressEventCamera,out Vector2 localPointer))
         {
-            _rect.anchoredPosition = localPointer + _grabOffset;
+            AlignCenterToPointer(localPointer);
         }
     }
 
@@ -166,7 +182,7 @@ public class ItemDrag : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDrag
 
         FinishDragState();
 
-        if (targetGrid != null & targetGrid.isActiveAndEnabled && targetGrid.ContainerRect != null && RectTransformUtility.RectangleContainsScreenPoint( targetGrid.ContainerRect, eventData.position, eventData.pressEventCamera))
+        if (targetGrid != null && targetGrid.isActiveAndEnabled && targetGrid.ContainerRect != null && RectTransformUtility.RectangleContainsScreenPoint( targetGrid.ContainerRect, eventData.position, eventData.pressEventCamera))
         {
             Vector2 targetPosition = targetGrid.ContainerRect.InverseTransformPoint(_rect.position);
             Vector2Int cell = targetGrid.GetIndexFromPosition(targetPosition);
@@ -188,6 +204,7 @@ public class ItemDrag : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDrag
 
         // 확정 width/height는 변경하지 않습니다.
         _rect.sizeDelta = _myGrid.GetItemSize(_previewWidth, _previewHeight);
+        AlignCenterToPointer(_dragPointerLocal);
     }
 
     public void CancelDrag()

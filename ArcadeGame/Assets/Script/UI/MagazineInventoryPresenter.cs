@@ -1,41 +1,59 @@
+using System;
 using UnityEngine;
 
 [DisallowMultipleComponent]
 public sealed class MagazineInventoryPresenter : MonoBehaviour
 {
+    [Serializable]
+    private sealed class ItemBinding
+    {
+        public MagazineItemView view;
+        public ItemDrag drag;
+        public InventoryGrid initialGrid;
+    }
+
     [SerializeField] private MagazineInventory inventory;
-    [SerializeField] private MagazineItemView[] views;
+    [SerializeField] private ItemBinding[] bindings;
 
     private void OnEnable()
     {
         Rebind();
     }
 
-    /// <summary>
-    /// 보관 목록의 인스턴스를 각 UI에 연결합니다.
-    /// UI만 다시 연결하며 탄창은 생성하지 않습니다.
-    /// </summary>
     public void Rebind()
     {
-        if (inventory != null)
-            inventory.EnsureInitialized();
-
-        if (views == null)
+        if (inventory == null || bindings == null)
             return;
 
-        for (int i = 0; i < views.Length; i++)
+        inventory.EnsureInitialized();
+
+        for (int i = 0; i < bindings.Length; i++)
         {
-            MagazineItemView view = views[i];
+            ItemBinding binding = bindings[i];
 
-            if (view == null)
+            if (binding == null || binding.view == null || binding.drag == null)
                 continue;
+            
 
-            MagazineItemInstance item = null;
+            if (!inventory.TryGetItem( i, out MagazineItemInstance item))
+            {
+                binding.view.Bind(null);
+                continue;
+            }
 
-            if (inventory != null)
-                inventory.TryGetItem(i, out item);
+            binding.view.Bind(item);
 
-            view.Bind(item);
+            bool placed = binding.drag.TryInitialize( binding.initialGrid, item.Data.GridWidth, item.Data.GridHeight);
+
+            if (!placed)
+            {
+            #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                            Debug.LogError(
+                                $"탄창 {i}의 배치에 실패했습니다. " +
+                                "그리드 연결과 빈 공간을 확인하세요.",
+                                binding.drag);
+            #endif
+            }
         }
     }
 }

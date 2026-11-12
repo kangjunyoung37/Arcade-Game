@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: TextMagazine
   m_EditorClassIdentifier: 
   displayName: "\uD14C\uC2A4\uD2B8 \uB77C\uC774\uD50C 30\uBC1C \uD0C4\uCC3D"
-  icon: {fileID: 0}
+  icon: {fileID: 10901, guid: 0000000000000000f000000000000000, type: 0}
   caliber: {fileID: 11400000, guid: 03b52885dbe2f084fb7a540cf11ce0ca, type: 2}
   pattern: {fileID: 11400000, guid: 5b7da73370e5cbb44b7ff0326029bb01, type: 2}
   capacity: 30
