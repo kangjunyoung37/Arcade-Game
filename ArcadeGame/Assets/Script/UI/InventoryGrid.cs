@@ -140,7 +140,7 @@ public class InventoryGrid : MonoBehaviour
    
     public bool TryPlaceItem( ItemDrag item, int x, int y, int width, int height)
     {
-        if (item == null)
+        if (item == null || item.IsInteractionLocked)
             return false;
 
         InventoryGrid source = item._myGrid;
@@ -419,5 +419,6 @@ public class InventoryGrid : MonoBehaviour
             $"테스트 예약 해제: {releasedCells}칸",
             this);
     }
+    
 #endif
 }

@@ -24,6 +24,7 @@ public class ItemDrag : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDrag
 
     private RectTransform _rect;
     private CanvasGroup _canvasGroup;
+    private IInventoryItemLock _interactionLock;
 
     private bool _isDragging;
     private int _previewWidth;
@@ -35,6 +36,8 @@ public class ItemDrag : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDrag
 
     public bool IsPlaced { get; private set; }
     public bool IsDragging => _isDragging;
+
+    public bool IsInteractionLocked => _interactionLock != null && _interactionLock.IsReserved;
 
     private void Awake()
     {
@@ -122,6 +125,9 @@ public class ItemDrag : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDrag
     }
     public void OnBeginDrag(PointerEventData eventData)
     {
+        if (IsInteractionLocked)
+            return;
+
         if (eventData.button != PointerEventData.InputButton.Left || CurrrentlyDraggedItem != null || !IsPlaced || _myGrid == null || dragLayer == null || !dragLayer.gameObject.activeInHierarchy)
         {
             return;
@@ -156,6 +162,12 @@ public class ItemDrag : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDrag
 
     public void OnDrag(PointerEventData eventData)
     {
+        if (IsInteractionLocked)
+        {
+            CancelDrag();
+            return;
+        }
+
         if (!_isDragging || dragLayer == null)
             return;
 
@@ -167,6 +179,11 @@ public class ItemDrag : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDrag
 
     public void OnEndDrag(PointerEventData eventData)
     {
+        if (IsInteractionLocked)
+        {
+            CancelDrag();
+            return;
+        }
         if (!_isDragging)
             return;
 
@@ -195,6 +212,12 @@ public class ItemDrag : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDrag
 
     public void RotateItem()
     {
+
+        if (IsInteractionLocked)
+        {
+            CancelDrag();
+            return;
+        }
         if (!_isDragging || _myGrid == null)
             return;
 
@@ -251,6 +274,20 @@ public class ItemDrag : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDrag
 
         _rect.sizeDelta =
             _myGrid.GetItemSize(width, height);
+    }
+
+    /// <summary>
+    /// 이 UI가 표시하는 실제 아이템의 잠금 정보를 연결합니다.
+    /// 이 함수가 직접 예약하거나 해제하지는 않습니다.
+    /// </summary>
+    public void BindInteractionLock(IInventoryItemLock source)
+    {
+        if (ReferenceEquals(_interactionLock, source))
+            return;
+
+        // 다른 데이터로 연결을 바꾸는 동안 드래그를 유지하지 않습니다.
+        CancelDrag();
+        _interactionLock = source;
     }
 
     private void OnDisable()

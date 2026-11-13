@@ -155,5 +155,70 @@ public sealed class MagazineInventory : MonoBehaviour
                 this);
         }
     }
+
+    private readonly object _debugItemReservationOwner = new object();
+    private MagazineItemInstance _debugReservedMagazine;
+
+    [ContextMenu("Debug/Reserve First Magazine")]
+    private void DebugReserveFirstMagazine()
+    {
+        if (!Application.isPlaying)
+            return;
+
+        if (_debugReservedMagazine != null)
+        {
+            Debug.Log("먼저 기존 테스트 예약을 해제하세요.", this);
+            return;
+        }
+
+        EnsureInitialized();
+
+        const int firstMagazineIndex = 0;
+
+        if (!TryGetItem(firstMagazineIndex, out MagazineItemInstance item))
+        {
+            Debug.LogWarning("첫 번째 탄창이 없습니다.", this);
+            return;
+        }
+
+        if (!item.TryReserve(_debugItemReservationOwner))
+        {
+            Debug.LogWarning("이미 다른 작업이 예약한 탄창입니다.", this);
+            return;
+        }
+
+        _debugReservedMagazine = item;
+
+        Debug.Log(
+            $"탄창 예약 성공: {item.InstanceId}",
+            this);
+    }
+
+    [ContextMenu("Debug/Release First Magazine Reservation")]
+    private void DebugReleaseFirstMagazineReservation()
+    {
+        if (!Application.isPlaying || _debugReservedMagazine == null)
+            return;
+
+        bool released = _debugReservedMagazine.ReleaseReservation(
+            _debugItemReservationOwner);
+
+        _debugReservedMagazine = null;
+
+        Debug.Log($"탄창 예약 해제: {released}", this);
+    }
+
+    // 테스트용 예약자가 파괴될 때 자신이 만든 예약을 정리합니다.
+    // OnDisable에서는 해제하지 않습니다.
+    private void OnDestroy()
+    {
+        if (_debugReservedMagazine != null)
+        {
+            _debugReservedMagazine.ReleaseReservation(
+                _debugItemReservationOwner);
+
+            _debugReservedMagazine = null;
+        }
+    }
 #endif
 }

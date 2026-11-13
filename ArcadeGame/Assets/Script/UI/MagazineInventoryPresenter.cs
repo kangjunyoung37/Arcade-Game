@@ -42,6 +42,8 @@ public sealed class MagazineInventoryPresenter : MonoBehaviour
             }
 
             binding.view.Bind(item);
+            // UI 표시와 드래그가 같은 탄창 인스턴스를 참조합니다.
+            binding.drag.BindInteractionLock(item);
 
             bool placed = binding.drag.TryInitialize( binding.initialGrid, item.Data.GridWidth, item.Data.GridHeight);
 
