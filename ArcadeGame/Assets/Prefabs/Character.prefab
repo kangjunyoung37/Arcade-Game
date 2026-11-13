@@ -296,6 +296,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   testAmmo: {fileID: 11400000, guid: c2f1cfcda11c49e428995948a039a726, type: 2}
+  testMagazineData: {fileID: 11400000, guid: b92cce7f0fefdb144a6d3d146389b4fa, type: 2}
 --- !u!1 &2470355001198245331
 GameObject:
   m_ObjectHideFlags: 0

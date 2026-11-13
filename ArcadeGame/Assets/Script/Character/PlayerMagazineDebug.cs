@@ -6,17 +6,16 @@ using UnityEngine;
 public sealed class PlayerMagazineDebug : MonoBehaviour
 {
 #if UNITY_EDITOR
-    private const int TestCapacity = 5;
     private const int InitialRoundsA = 3;
     private const int InitialRoundsB = 2;
 
     [SerializeField] private BulletData testAmmo;
-
+    [SerializeField] private MagazineData testMagazineData;
     private PlayerWeapon _weapon;
 
     // 테스트용 인벤토리 슬롯 두 개입니다.
-    private AmmoMagazine _spareMagazine;
-    private AmmoMagazine _removedMagazine;
+    private MagazineItemInstance  _spareMagazine;
+    private MagazineItemInstance  _removedMagazine;
     private MagazineSlot _spareSlot;
 
     private bool _ready;
@@ -30,7 +29,10 @@ public sealed class PlayerMagazineDebug : MonoBehaviour
     {
         if (_weapon == null ||
             !_weapon.isActiveAndEnabled ||
-            _weapon.Data == null ||
+            _weapon.Data == null || testMagazineData == null ||
+            !_weapon.Data.IsMagazineCompatible(testMagazineData) ||
+            testMagazineData.Capacity < InitialRoundsA ||
+            testMagazineData.Capacity < InitialRoundsB ||   
             testAmmo == null ||
             !_weapon.Data.IsAmmoCompatible(testAmmo) ||
             testAmmo.speed <= 0f ||
@@ -51,12 +53,11 @@ public sealed class PlayerMagazineDebug : MonoBehaviour
             testAmmo,
             InitialRoundsA + InitialRoundsB);
 
-        _spareMagazine = new AmmoMagazine(
-            testAmmo.caliber,
-            TestCapacity);
+        _spareMagazine = new MagazineItemInstance(testMagazineData);
 
         for (int i = 0; i < InitialRoundsA; i++)
-            supply.TryLoadOneInto(_spareMagazine);
+            _spareMagazine.TryLoadOneFrom(supply);
+        
 
         // A를 무기에 넣습니다.
         // 기존 장착 탄창이 없으므로 성공 후 spare 슬롯은 null입니다.
@@ -74,12 +75,10 @@ public sealed class PlayerMagazineDebug : MonoBehaviour
         }
 
         // 예비 슬롯에는 B를 준비합니다.
-        _spareMagazine = new AmmoMagazine(
-            testAmmo.caliber,
-            TestCapacity);
+        _spareMagazine = new MagazineItemInstance(testMagazineData);
 
         for (int i = 0; i < InitialRoundsB; i++)
-            supply.TryLoadOneInto(_spareMagazine);
+            _spareMagazine.TryLoadOneFrom(supply);
 
         // 탄창을 슬롯으로 이동합니다.
         // 이 호출 뒤 _spareMagazine은 null입니다.
@@ -176,7 +175,7 @@ public sealed class PlayerMagazineDebug : MonoBehaviour
             _spareSlot != null ? _spareSlot.RoundCount : 0;
 
         int removedCount =
-            _removedMagazine != null ? _removedMagazine.Count : 0;
+            _removedMagazine != null ? _removedMagazine.RoundCount : 0;
 
         int total =
             _weapon.TotalLoadedRounds + spareCount + removedCount;
@@ -195,6 +194,11 @@ public sealed class PlayerMagazineDebug : MonoBehaviour
             $"제거 탄창: {removedCount}, " +
             $"총 실탄: {total}",
             this);
+        Debug.Log(
+            $"장착 ID: {_weapon.EquippedMagazine?.InstanceId}, " +
+            $"예비 ID: {_spareSlot?.Magazine?.InstanceId}, " +
+            $"제거 ID: {_removedMagazine?.InstanceId}",
+        this);
     }
 #endif
 }

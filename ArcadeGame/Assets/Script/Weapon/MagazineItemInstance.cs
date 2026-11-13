@@ -54,4 +54,20 @@ public sealed class MagazineItemInstance
     {
         return _ammo.TryPeekNextRound(out ammo);
     }
+
+    /// <summary>
+    /// 이 탄창에서 약실로 한 발을 옮깁니다.
+    /// 실패하면 탄창과 약실의 탄약 상태는 유지됩니다.
+    /// </summary>
+    public bool TryFeedIntoChamber(AmmoChamber chamber)
+    {
+        if (chamber == null)
+            return false;
+
+        if (!chamber.TryFeedFromMagazine(_ammo))
+            return false;
+
+        Changed?.Invoke();
+        return true;
+    }
 }

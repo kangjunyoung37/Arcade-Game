@@ -15,7 +15,11 @@ public class InventoryGrid : MonoBehaviour
     public Transform itemContainer;
     // 1비트 = 한 칸의 점유 여부
     private uint[] _rowMasks;
+    // 예약된 칸을 표시합니다. 실제 아이템 점유와 별도로 관리합니다.
+    private uint[] _reservedRowMasks;
 
+    // 각 칸을 어떤 작업자가 예약했는지 저장합니다.
+    private object[,] _reservationOwners;
     // 실제로 어떤 아이템이 점유하는지 저장
     private ItemDrag[,] _items;
 
@@ -45,6 +49,9 @@ public class InventoryGrid : MonoBehaviour
 
         _rowMasks = new uint[_rows];
         _items = new ItemDrag[_columns, _rows];
+
+        _reservedRowMasks = new uint[_rows];
+        _reservationOwners = new object[_columns, _rows];   
 
         return true;
     }
@@ -114,13 +121,16 @@ public class InventoryGrid : MonoBehaviour
         {
             uint occupied = _rowMasks[row];
 
+            // 이동 중인 아이템 자신의 기존 점유만 제외합니다.
             if (ignoreSelf && row >= selfStartY && row < selfEndY)
                 occupied &= ~selfMask;
 
-            if ((occupied & candidateMask) != 0u)
+            // 예약 영역은 자신의 기존 점유와 별도로 차단합니다.
+            uint blocked = occupied | _reservedRowMasks[row];
+
+            if ((blocked & candidateMask) != 0u)
                 return false;
         }
-
         return true;
     }
 
@@ -224,7 +234,88 @@ public class InventoryGrid : MonoBehaviour
         
         return _items[x, y];
     }
+    /// <summary>
+    /// 비어 있는 직사각형 영역을 예약합니다.
+    /// 실제 아이템 배치와 점유 마스크는 변경하지 않습니다.
+    /// </summary>
+    public bool TryReserveArea(object owner, int x, int y, int width, int height)
+    {
+        if (owner == null)
+            return false;
 
+        // movingItem을 전달하지 않습니다.
+        // 이번 API는 실제로 비어 있는 공간만 예약합니다.
+        if (!CanPlaceItem(x, y, width, height))
+            return false;
+
+        uint mask = MakeMask(x, width);
+
+        for (int row = y; row < y + height; row++)
+        {
+            _reservedRowMasks[row] |= mask;
+
+            for (int column = x; column < x + width; column++)
+            {
+                _reservationOwners[column, row] = owner;
+            }
+        }
+
+        return true;
+    }
+    /// <summary>
+    /// 왼쪽 위부터 빈 공간을 검색한 뒤 예약합니다.
+    /// 실패하면 기존 예약과 아이템 배치는 유지됩니다.
+    /// </summary>
+    public bool TryReserveSpace( object owner, int width, int height, out Vector2Int position)
+    {
+        position = default;
+
+        if (owner == null)
+            return false;
+
+        if (!TryFindSpace(width, height, out Vector2Int candidate))
+            return false;
+
+        if (!TryReserveArea( owner, candidate.x,candidate.y, width, height))
+        {
+            return false;
+        }
+
+        position = candidate;
+        return true;
+    }
+    /// <summary>
+    /// 이 그리드에서 owner가 소유한 예약을 모두 해제합니다.
+    /// 다른 작업자의 예약과 실제 아이템은 변경하지 않습니다.
+    /// 반환값은 해제한 칸 수입니다.
+    /// </summary>
+    public int ReleaseReservations(object owner)
+    {
+        if (owner == null || _reservationOwners == null)
+            return 0;
+
+        int releasedCells = 0;
+
+        for (int row = 0; row < _rows; row++)
+        {
+            // 예약이 없는 행은 검사하지 않습니다.
+            if (_reservedRowMasks[row] == 0u)
+                continue;
+
+            for (int column = 0; column < _columns; column++)
+            {
+                if (!ReferenceEquals(_reservationOwners[column, row], owner))
+                    continue;
+                
+                _reservationOwners[column, row] = null;
+                _reservedRowMasks[row] &= ~(1u << column);
+
+                releasedCells++;
+            }
+        }
+
+        return releasedCells;
+    }
     internal void ForgetDestroyedItem(ItemDrag item)
     {
         if (_items == null)
@@ -272,6 +363,61 @@ public class InventoryGrid : MonoBehaviour
         }
 
         Debug.Log("비트마스크와 아이템 배열이 일치합니다.", this);
+    }
+    private readonly object _debugReservationOwner = new object();
+    private bool _debugHasReservation;
+
+    [ContextMenu("Debug/Reserve Empty 1x2 Area")]
+    private void DebugReserveArea()
+    {
+        if (!Application.isPlaying)
+            return;
+
+        if (_debugHasReservation)
+        {
+            Debug.Log(
+                "이미 테스트 공간을 예약했습니다. 먼저 해제하세요.",
+                this);
+            return;
+        }
+
+        const int testWidth = 1;
+        const int testHeight = 2;
+
+        if (!TryReserveSpace(
+                _debugReservationOwner,
+                testWidth,
+                testHeight,
+                out Vector2Int position))
+        {
+            Debug.Log(
+                "예약 실패: 비어 있는 1x2 공간이 없습니다.",
+                this);
+            return;
+        }
+
+        _debugHasReservation = true;
+
+        Debug.Log(
+            $"예약 성공: {name}, 시작 칸 ({position.x}, {position.y}), " +
+            $"크기 {testWidth}x{testHeight}",
+            this);
+    }
+
+    [ContextMenu("Debug/Release Test Reservation")]
+    private void DebugReleaseReservation()
+    {
+        if (!Application.isPlaying)
+            return;
+
+        int releasedCells =
+            ReleaseReservations(_debugReservationOwner);
+
+        _debugHasReservation = false;
+
+        Debug.Log(
+            $"테스트 예약 해제: {releasedCells}칸",
+            this);
     }
 #endif
 }
