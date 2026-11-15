@@ -64,7 +64,6 @@ public sealed class MagazineItemInstance : IInventoryItemLock
         if (chamber == null)
             return false;
 
-        
         if (IsReserved && !IsReservedBy(reservationOwner))
             return false;
 

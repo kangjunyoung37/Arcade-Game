@@ -289,7 +289,17 @@ public class ItemDrag : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDrag
         CancelDrag();
         _interactionLock = source;
     }
+    // 화면에 연결된 잠금 정보가 전달한 실제 아이템인지 검사합니다.
+    public bool IsBoundTo(IInventoryItemLock source)
+    {
+        return source != null && ReferenceEquals(_interactionLock, source);
+    }
 
+    // 특정 작업자가 이 아이템을 예약했는지 검사합니다.
+    public bool IsReservedBy(object owner)
+    {
+        return _interactionLock != null && _interactionLock.IsReservedBy(owner);
+    }
     private void OnDisable()
     {
         CancelDrag();

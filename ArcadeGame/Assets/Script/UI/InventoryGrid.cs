@@ -170,8 +170,10 @@ public class InventoryGrid : MonoBehaviour
         return true;
     }
 
-    private bool OwnsPlacement(ItemDrag item)
+    internal  bool OwnsPlacement(ItemDrag item)
     {
+        if (item == null)
+            return false;
         if (!EnsureInitialized() || !item.IsPlaced ||item._myGrid != this || !IsInside( item.currentGridX, item.currentGridY, item.width, item.height))
             return false;
         
@@ -243,23 +245,10 @@ public class InventoryGrid : MonoBehaviour
         if (owner == null)
             return false;
 
-        // movingItem을 전달하지 않습니다.
-        // 이번 API는 실제로 비어 있는 공간만 예약합니다.
         if (!CanPlaceItem(x, y, width, height))
             return false;
 
-        uint mask = MakeMask(x, width);
-
-        for (int row = y; row < y + height; row++)
-        {
-            _reservedRowMasks[row] |= mask;
-
-            for (int column = x; column < x + width; column++)
-            {
-                _reservationOwners[column, row] = owner;
-            }
-        }
-
+        WriteReservation(owner, x, y, width, height);
         return true;
     }
     /// <summary>
@@ -335,7 +324,39 @@ public class InventoryGrid : MonoBehaviour
             }
         }
     }
+    // 범위·점유·예약 충돌 검사가 끝난 뒤에만 호출합니다.
+    private void WriteReservation( object owner, int x, int y, int width, int height)
+    {
+        uint mask = MakeMask(x, width);
 
+        for (int row = y; row < y + height; row++)
+        {
+            _reservedRowMasks[row] |= mask;
+
+            for (int column = x; column < x + width; column++)
+            {
+                _reservationOwners[column, row] = owner;
+            }
+        }
+    }
+    /// <summary>
+    /// 무기로 이동할 아이템의 점유를 제외하고 반환 공간을 예약합니다.
+    /// 해당 아이템을 예약한 작업자만 사용할 수 있습니다.
+    /// 실제 아이템을 제거하거나 이동하지는 않습니다.
+    /// </summary>
+    internal bool TryReserveReplacementArea( object owner, ItemDrag outgoingItem, int x, int y, int width, int height)
+    {
+        if (owner == null || outgoingItem == null || outgoingItem.IsDragging || !outgoingItem.IsReservedBy(owner) || !OwnsPlacement(outgoingItem))
+        {
+            return false;
+        }
+
+        if (!CanPlaceItem( x, y, width, height, outgoingItem))
+            return false;
+        
+        WriteReservation(owner, x, y, width, height);
+        return true;
+    }
 #if UNITY_EDITOR
     [ContextMenu("Debug/Validate Occupancy")]
     private void ValidateOccupancy()
