@@ -116,6 +116,36 @@ public sealed class MagazineInventory : MonoBehaviour
 
         return item.TryLoadOneFrom(_looseAmmo);
     }
+    // 예약된 탄창을 교환해도 되는지 검사합니다.
+    // 검사만 수행하며 배열은 변경하지 않습니다.
+    internal bool CanReplaceReservedItem(int index, MagazineItemInstance expected, MagazineItemInstance replacement, object owner)
+    {
+        if (owner == null || expected == null || !expected.IsReservedBy(owner) || !TryGetItem(index, out MagazineItemInstance current) || !ReferenceEquals(current, expected))
+            return false;
+        
+        if (replacement != null && !replacement.IsReservedBy(owner))
+            return false;
+        
+        // 같은 탄창이 배열 여러 곳에 들어가거나,
+        // 반환 탄창이 이미 인벤토리에 있는 경우는 거절합니다.
+        for (int i = 0; i < _items.Length; i++)
+        {
+            if (i != index && ReferenceEquals(_items[i], expected))
+                return false;
+
+            if (replacement != null && ReferenceEquals(_items[i], replacement))
+                return false;
+        }
+
+        return true;
+    }
+
+    // 모든 검증을 완료한 교환 작업에서만 호출합니다.
+    // 이벤트나 UI 갱신은 여기서 실행하지 않습니다.
+    internal void ReplaceItemAfterValidation(int index, MagazineItemInstance replacement)
+    {
+        _items[index] = replacement;
+    }
 
     [System.Diagnostics.Conditional("UNITY_EDITOR")]
     [System.Diagnostics.Conditional("DEVELOPMENT_BUILD")]

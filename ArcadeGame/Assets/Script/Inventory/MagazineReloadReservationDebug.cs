@@ -4,72 +4,72 @@ using UnityEngine;
 public sealed class MagazineReloadReservationDebug : MonoBehaviour
 {
 #if UNITY_EDITOR
+    [SerializeField] private PlayerWeapon weapon;
+    [SerializeField] private MagazineInventory inventory;
+
+    [SerializeField, Min(0)] private int inventoryIndex;
+
     [SerializeField] private MagazineItemView incomingView;
     [SerializeField] private ItemDrag incomingDrag;
-
-    [Tooltip("기존 장착 탄창의 크기를 흉내 낼 데이터입니다.")]
-    [SerializeField] private MagazineData returningMagazineData;
-
     [SerializeField] private InventoryContainer returnContainer;
-    private readonly MagazineReloadReservation _reservation =
-        new MagazineReloadReservation();
 
-    [ContextMenu("Debug/Prepare Reload Reservation")]
-    private void DebugPrepare()
+    [ContextMenu("Debug/Start Inventory Reload")]
+    private void DebugStartReload()
     {
-        if (!Application.isPlaying)
+        if (!Application.isPlaying ||
+            weapon == null ||
+            inventory == null)
+        {
             return;
+        }
 
-        bool prepared = _reservation.TryPrepare(
+        bool started = weapon.TryStartInventoryReload(
+            inventory,
+            inventoryIndex,
             incomingView,
             incomingDrag,
-            returningMagazineData,
             returnContainer);
 
-        if (!prepared)
-        {
-            Debug.Log(
-                $"준비 실패. 기존 준비 유지 여부: {_reservation.IsPrepared}",
-                this);
-            return;
-        }
-
-        InventoryGrid grid = _reservation.ReturnGrid;
-
-        if (grid == null)
-        {
-            Debug.Log(
-                "준비 성공: 탄창 예약 완료. 반환할 탄창은 없습니다.",
-                this);
-            return;
-        }
-
         Debug.Log(
-            $"준비 성공: 반환 그리드={grid.name}, " +
-            $"좌표={_reservation.ReturnPosition}, " +
-            $"크기={_reservation.ReturnSize}",
+            $"인벤토리 재장전 시작={started}, " +
+            $"현재 장착 ID={weapon.EquippedMagazine?.InstanceId}, " +
+            $"선택 탄창 ID={incomingView?.Item?.InstanceId}",
             this);
     }
 
-    [ContextMenu("Debug/Cancel Reload Reservation")]
-    private void DebugCancel()
+    [ContextMenu("Debug/Cancel Inventory Reload")]
+    private void DebugCancelReload()
     {
-        if (!Application.isPlaying)
+        if (!Application.isPlaying || weapon == null)
             return;
 
-        _reservation.Cancel();
+        weapon.CancelReload();
 
-        Debug.Log("준비 취소: 탄창과 반환 공간 예약 해제.", this);
+        Debug.Log("인벤토리 재장전 취소.", this);
     }
 
-    private void OnDisable()
+    [ContextMenu("Debug/Print Inventory Reload State")]
+    private void DebugPrintState()
     {
-        _reservation.Cancel();
-    }
+        if (!Application.isPlaying ||
+            weapon == null ||
+            inventory == null)
+        {
+            return;
+        }
 
-    private void OnDestroy()
-    {
-        _reservation.Cancel();
+        inventory.TryGetItem(
+            inventoryIndex,
+            out MagazineItemInstance stored);
+
+        Debug.Log(
+            $"재장전 중={weapon.IsReloading}, " +
+            $"장착 ID={weapon.EquippedMagazine?.InstanceId}, " +
+            $"인벤토리 ID={stored?.InstanceId}, " +
+            $"화면 ID={incomingView?.Item?.InstanceId}, " +
+            $"탄창={weapon.MagazineCount}, " +
+            $"약실={weapon.ChamberCount}",
+            this);
     }
 #endif
 }

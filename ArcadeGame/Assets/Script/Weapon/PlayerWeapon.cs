@@ -22,10 +22,11 @@ public sealed class PlayerWeapon : MonoBehaviour
     private MagazineItemInstance _equippedMagazine;
     private AmmoChamber _chamber;
     private WeaponData _initializedWeapon;
-
+    private readonly MagazineReloadReservation _inventoryReload = new MagazineReloadReservation();
     private float _lastFireTime = float.NegativeInfinity;
     private float _reloadDuration;
     private float _remainingReloadTime;
+    private bool _usesInventoryReload;
     public WeaponData Data => weaponData;
     public float CurrentSpread { get; private set; }
     public float ReloadProgress => IsReloading && _reloadDuration > 0f ? Mathf.Clamp01(1f - _remainingReloadTime / _reloadDuration) : 0f;
@@ -38,7 +39,7 @@ public sealed class PlayerWeapon : MonoBehaviour
 
     public int TotalLoadedRounds => MagazineCount + ChamberCount;
 
-    public bool IsReloading => _reloadSlot != null;
+    public bool IsReloading => _reloadSlot != null || _usesInventoryReload;
 
     //탄창이 바뀌었음을 입력 컨트롤러가 감지할 때 사용합니다.
     public uint MagazineRevision { get; private set; }
@@ -192,9 +193,13 @@ public sealed class PlayerWeapon : MonoBehaviour
     /// incomingSlot이 null이면 장착 탄창을 제거합니다.
     /// 약실의 탄약은 변경하지 않습니다.
     /// </summary>
-    public bool TryExchangeMagazine(
-        ref MagazineItemInstance incomingSlot)
+    public bool TryExchangeMagazine( ref MagazineItemInstance incomingSlot)
     {
+        if ((incomingSlot != null && incomingSlot.IsReserved) ||
+        (_equippedMagazine != null && _equippedMagazine.IsReserved))
+        {
+            return false;
+        }
         if (!CanOperateAmmo || IsReloading)
             return false;
 
@@ -236,18 +241,16 @@ public sealed class PlayerWeapon : MonoBehaviour
     /// </summary>
     public bool TryStartReload(MagazineSlot sourceSlot)
     {
-        if (!CanOperateAmmo || IsReloading || Time.timeScale <= 0f || sourceSlot == null || !sourceSlot.HasMagazine)
-        {
+        if (!CanOperateAmmo || IsReloading || Time.timeScale <= 0f || sourceSlot == null || !sourceSlot.HasMagazine)       
             return false;
-        }
-
+        
         MagazineItemInstance incomingMagazine = sourceSlot.Magazine;
-
-        if (ReferenceEquals(incomingMagazine, _equippedMagazine) || !IsCompatibleMagazine(incomingMagazine))
-        {
+        if (incomingMagazine.IsReserved || (_equippedMagazine != null && _equippedMagazine.IsReserved))
             return false;
-        }
-
+        
+        if (ReferenceEquals(incomingMagazine, _equippedMagazine) || !IsCompatibleMagazine(incomingMagazine))
+            return false;
+        
         if (!sourceSlot.TryReserve(this))
             return false;
 
@@ -286,7 +289,27 @@ public sealed class PlayerWeapon : MonoBehaviour
 
     // 완료 시점에 탄창 교환을 한 번만 적용합니다.
     private void CompleteReload()
-    {
+    {   
+         if (_usesInventoryReload)
+        {
+            bool completed = _inventoryReload.TryCommit(this);
+
+            CancelReload();
+
+            // 교환이 성공한 경우에만 빈 약실에 공급합니다.
+            if (completed && _chamber.IsEmpty)
+                TryFeedChamberFromEquippedMagazine();
+
+        #if UNITY_EDITOR
+                Debug.Log(
+                    $"[인벤토리 재장전] 완료 성공={completed}, " +
+                    $"장착 ID={_equippedMagazine?.InstanceId}, " +
+                    $"탄창={MagazineCount}, 약실={ChamberCount}",
+                    this);
+        #endif
+
+            return;
+        }
         MagazineSlot slot = _reloadSlot;
 
         if (slot == null)
@@ -322,16 +345,63 @@ public sealed class PlayerWeapon : MonoBehaviour
 
     // 탄창을 변경하지 않고 예약과 진행 상태만 해제합니다.
     // 완료 전에는 실제 교환을 하지 않았으므로 되돌릴 탄창도 없습니다
-    public void CancelReload()
+   public void CancelReload()
     {
         if (_reloadSlot != null)
             _reloadSlot.ReleaseReservation(this);
 
         _reloadSlot = null;
+
+        _inventoryReload.Cancel();
+        _usesInventoryReload = false;
+
         _reloadDuration = 0f;
         _remainingReloadTime = 0f;
     }
-    
+    public bool TryStartInventoryReload( MagazineInventory inventory, int inventoryIndex, MagazineItemView view, ItemDrag drag, InventoryContainer returnContainer)
+    {
+        if (!CanOperateAmmo || IsReloading || Time.timeScale <= 0f || inventory == null || view == null || drag == null ||!IsCompatibleMagazine(view.Item))
+            return false;
+        
+        if (!_inventoryReload.TryPrepareForWeapon( this, inventory, inventoryIndex, view, drag, returnContainer))
+            return false;
+
+        _usesInventoryReload = true;
+
+        _reloadDuration = Mathf.Max(WeaponData.MinimumShotInterval, weaponData.reloadTime);
+
+        _remainingReloadTime = _reloadDuration;
+
+        return true;
+    }
+    internal bool TryCommitInventoryMagazine(MagazineReloadReservation reservation, MagazineItemInstance expectedCurrent, MagazineItemInstance incoming)
+    {
+        if (!_usesInventoryReload ||
+            !ReferenceEquals(reservation, _inventoryReload) ||
+            !reservation.IsPrepared ||
+            !CanOperateAmmo ||
+            !ReferenceEquals(_equippedMagazine, expectedCurrent) ||
+            !IsCompatibleMagazine(incoming) ||
+            !incoming.IsReservedBy(reservation))
+        {
+            return false;
+        }
+
+        if (expectedCurrent != null && !expectedCurrent.IsReservedBy(reservation))
+        {
+            return false;
+        }
+
+        // 참조만 변경합니다. 약실 공급과 UI 갱신은 아직 하지 않습니다.
+        _equippedMagazine = incoming;
+
+        unchecked
+        {
+            MagazineRevision++;
+        }
+
+        return true;
+    }
     private void OnDisable()
     {
         CancelReload();

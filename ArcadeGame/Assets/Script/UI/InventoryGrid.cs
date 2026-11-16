@@ -357,7 +357,77 @@ public class InventoryGrid : MonoBehaviour
         WriteReservation(owner, x, y, width, height);
         return true;
     }
-#if UNITY_EDITOR
+    internal bool CanCommitReservedPlacement(object owner, ItemDrag item, int x, int y, int width, int height)
+    {
+        if (owner == null || item == null || item.IsDragging || !item.IsReservedBy(owner) || item._myGrid == null || !item._myGrid.OwnsPlacement(item) || !EnsureInitialized() || !IsInside(x, y, width, height))
+        {
+            return false;
+        }
+
+        uint mask = MakeMask(x, width);
+
+        bool ignoreSource = item._myGrid == this;
+
+        uint sourceMask = ignoreSource? MakeMask(item.currentGridX, item.width) : 0u;
+
+        for (int row = y; row < y + height; row++)
+        {
+            // 필요한 모든 칸에 예약이 남아 있어야 합니다.
+            if ((_reservedRowMasks[row] & mask) != mask)
+                return false;
+
+            uint occupied = _rowMasks[row];
+
+            if (ignoreSource && row >= item.currentGridY && row < item.currentGridY + item.height)
+            {
+                occupied &= ~sourceMask;
+            }
+
+            if ((occupied & mask) != 0u)
+                return false;
+
+            // 예약의 소유자도 일치해야 합니다.
+            for (int column = x; column < x + width; column++)
+            {
+                if (!ReferenceEquals( _reservationOwners[column, row], owner))
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    // 검증 직후, 같은 메인 스레드 호출 흐름에서만 사용합니다.
+    // Transform 변경이나 이벤트 호출을 하지 않습니다.
+    internal void CommitReservedPlacement( ItemDrag item, int x, int y, int width, int height)
+    {
+        InventoryGrid source = item._myGrid;
+
+        source.ClearCommittedPlacement(item);
+
+        uint mask = MakeMask(x, width);
+
+        for (int row = y; row < y + height; row++)
+        {
+            _rowMasks[row] |= mask;
+
+            for (int column = x; column < x + width; column++)
+            {
+                _items[column, row] = item;
+            }
+        }
+
+        item.SetPlacementState(this, x, y, width, height);
+    }
+
+    internal void RemovePlacementForReload(ItemDrag item)
+    {
+        ClearCommittedPlacement(item);
+        item.ClearPlacementState();
+    }
+    #if UNITY_EDITOR
     [ContextMenu("Debug/Validate Occupancy")]
     private void ValidateOccupancy()
     {

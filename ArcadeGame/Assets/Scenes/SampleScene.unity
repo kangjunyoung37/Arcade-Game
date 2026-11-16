@@ -6910,9 +6910,11 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: bfc228ae9043a754db808fe2e00fc04b, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  weapon: {fileID: 0}
+  inventory: {fileID: 1237701271}
+  inventoryIndex: 0
   incomingView: {fileID: 845363493}
   incomingDrag: {fileID: 845363495}
-  returningMagazineData: {fileID: 11400000, guid: b92cce7f0fefdb144a6d3d146389b4fa, type: 2}
   returnContainer: {fileID: 288013113}
 --- !u!1 &1289088611
 GameObject:

@@ -90,24 +90,49 @@ public class ItemDrag : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDrag
 
     internal void ApplyPlacement( InventoryGrid grid, int x, int y, int itemWidth, int itemHeight)
     {
-        CacheComponents();
-
+        SetPlacementState(grid, x, y, itemWidth, itemHeight);
+        RefreshPlacementVisual();
+    }
+    
+    // 배치 정보만 변경합니다. Transform과 UI는 건드리지 않습니다.
+    internal void SetPlacementState( InventoryGrid grid, int x, int y, int itemWidth, int itemHeight)
+    {
         _myGrid = grid;
         currentGridX = x;
         currentGridY = y;
 
-        // 확정된 크기만 여기에 저장합니다.
         width = itemWidth;
         height = itemHeight;
+
         IsPlaced = true;
+    }
+
+    // 그리드에서 제거된 상태를 기록합니다.
+    internal void ClearPlacementState()
+    {
+        _myGrid = null;
+        currentGridX = 0;
+        currentGridY = 0;
+        IsPlaced = false;
+    }
+
+    // 데이터 변경이 모두 끝난 뒤 화면을 반영합니다.
+    internal void RefreshPlacementVisual()
+    {
+        CacheComponents();
+
+        if (!IsPlaced)
+        {
+            _canvasGroup.alpha = 0f;
+            _canvasGroup.blocksRaycasts = false;
+            return;
+        }
 
         RestoreCommittedPlacement();
 
         _canvasGroup.alpha = 1f;
         _canvasGroup.blocksRaycasts = true;
     }
-
-
     // 아이템 RectTransform의 중심을 마우스 위치에 맞춥니다.
     // Pivot은 변경하지 않아 기존 그리드 배치 계산을 유지합니다.
     private void AlignCenterToPointer(Vector2 localPointer)
