@@ -3159,6 +3159,7 @@ MonoBehaviour:
   aimCameraTarget: {fileID: 230327455}
   virtualCamera: {fileID: 558018547}
   targetGroup: {fileID: 980131140}
+  reloadService: {fileID: 1237701273}
 --- !u!1 &527486153
 GameObject:
   m_ObjectHideFlags: 0
@@ -6846,6 +6847,7 @@ GameObject:
   - component: {fileID: 1237701270}
   - component: {fileID: 1237701271}
   - component: {fileID: 1237701272}
+  - component: {fileID: 1237701273}
   m_Layer: 0
   m_Name: InventorySystem
   m_TagString: Untagged
@@ -6916,6 +6918,21 @@ MonoBehaviour:
   incomingView: {fileID: 845363493}
   incomingDrag: {fileID: 845363495}
   returnContainer: {fileID: 288013113}
+--- !u!114 &1237701273
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1237701269}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b2b941d65271533459170bcfc436063e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  presenter: {fileID: 1353206859}
+  quickReloadContainers:
+  - {fileID: 288013113}
 --- !u!1 &1289088611
 GameObject:
   m_ObjectHideFlags: 0

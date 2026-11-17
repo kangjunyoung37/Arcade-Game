@@ -15,6 +15,8 @@ public sealed class MagazineInventoryPresenter : MonoBehaviour
     [SerializeField] private MagazineInventory inventory;
     [SerializeField] private ItemBinding[] bindings;
 
+    public MagazineInventory Inventory => inventory;
+    public int BindingCount => bindings != null ? bindings.Length : 0;
     private void OnEnable()
     {
         Rebind();
@@ -58,5 +60,31 @@ public sealed class MagazineInventoryPresenter : MonoBehaviour
             #endif
             }
         }
+    }
+    /// <summary>
+    /// 인벤토리 데이터와 UI가 같은 탄창을 참조하는지 확인하고 반환합니다.
+    /// </summary>
+    public bool TryGetBoundItem( int index, out MagazineItemInstance item, out MagazineItemView view, out ItemDrag drag)
+    {
+        item = null;
+        view = null;
+        drag = null;
+
+        if (inventory == null || bindings == null || index < 0 || index >= bindings.Length)
+            return false;
+        
+        ItemBinding binding = bindings[index];
+
+        if (binding == null || binding.view == null || binding.drag == null || !inventory.TryGetItem(index, out MagazineItemInstance found))
+            return false;
+
+        if (!ReferenceEquals(binding.view.Item, found) || !binding.drag.IsBoundTo(found) || !binding.drag.IsPlaced)
+            return false;
+    
+        item = found;
+        view = binding.view;
+        drag = binding.drag;
+
+        return true;
     }
 }

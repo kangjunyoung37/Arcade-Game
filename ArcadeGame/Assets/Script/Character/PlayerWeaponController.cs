@@ -5,12 +5,14 @@ using UnityEngine;
 [RequireComponent(typeof(Character), typeof(PlayerWeapon))]
 public sealed class PlayerWeaponController : MonoBehaviour
 {
+    private const KeyCode ReloadKey = KeyCode.R;
     private const int FireMouseButton = 0;
 
     private Character _owner;
     private WeaponData _weapon;
     private FireMode _mode;
     private PlayerWeapon _playerWeapon;
+    private PlayerReloadService _reloadService;
     private int _remainingBurstShots;
     private uint _observedMagazineRevision;
     private float _nextShotTime = float.NegativeInfinity;
@@ -25,6 +27,13 @@ public sealed class PlayerWeaponController : MonoBehaviour
     private void Update()
     {
         float now = Time.time;
+        bool reloadPressed = Input.GetKeyDown(ReloadKey);
+
+        ItemDrag draggedItem = ItemDrag.CurrrentlyDraggedItem;
+        bool wasDragging = draggedItem != null;
+
+        if (reloadPressed && wasDragging)
+            draggedItem.RotateItem();
 
         if (_owner == null || _playerWeapon == null)
         {
@@ -71,6 +80,17 @@ public sealed class PlayerWeaponController : MonoBehaviour
 
         if (Time.deltaTime <= 0f)
             return;
+        
+        // 드래그 중에는 R을 회전으로만 사용합니다.
+        // 드래그하는 동안 발사 입력도 처리하지 않습니다.
+        if (wasDragging)
+            return;
+
+        if (reloadPressed && _reloadService != null && _reloadService.TryStartQuickReload(_playerWeapon))
+        {
+            CancelBurst(now);
+            return;
+        }
 
         if (now < _nextShotTime)
             return;
@@ -105,6 +125,19 @@ public sealed class PlayerWeaponController : MonoBehaviour
         }
     }
 
+    public void BindReloadService(PlayerReloadService service)
+    {
+        _reloadService = service;
+
+    #if UNITY_EDITOR || DEVELOPMENT_BUILD
+        if (_reloadService == null)
+        {
+            Debug.LogWarning(
+                "재장전 서비스가 연결되지 않았습니다. R키 재장전은 사용할 수 없습니다.",
+                this);
+        }
+    #endif
+    }
     private void TryExecuteShot(float now)
     {
         // 실제 발사에 실패하면 남은 점사도 취소합니다.

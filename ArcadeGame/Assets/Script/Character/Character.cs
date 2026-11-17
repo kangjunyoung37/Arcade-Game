@@ -117,7 +117,6 @@ public class Character : MonoBehaviour
             HandleAimAndCamera();
         }
         Dodge();
-        RotateItem();
         UpdateFootstepNoise();
     }
 
@@ -271,18 +270,7 @@ public class Character : MonoBehaviour
             _currentSpeed = normalspeed;
         }
     }
-
-    private void RotateItem()
-    {
-        if (Input.GetKeyDown(KeyCode.R))
-        {
-            if (ItemDrag.CurrrentlyDraggedItem)
-            {
-                ItemDrag.CurrrentlyDraggedItem.RotateItem();
-            }
-        }
-    }
-
+    
     private void UpdateFootstepNoise()
     {
         Vector3 currentPosition = transform.position;

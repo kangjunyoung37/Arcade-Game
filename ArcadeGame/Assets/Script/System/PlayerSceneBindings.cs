@@ -16,6 +16,9 @@ public sealed class PlayerSceneBindings : MonoBehaviour
     [Header("Cinemachine")]
     [SerializeField] private CinemachineVirtualCamera virtualCamera;
     [SerializeField] private CinemachineTargetGroup targetGroup;
+    
+    [Header("Inventory Reload")]
+    [SerializeField] private PlayerReloadService reloadService;
 
     private readonly CinemachineTargetGroup.Target[] _members = new CinemachineTargetGroup.Target[MemberCount];
 
@@ -35,8 +38,10 @@ public sealed class PlayerSceneBindings : MonoBehaviour
 
         if (!player.InitializeSceneReferences(gameplayCamera,crosshair, aimCameraTarget))
             return false;
-        
 
+        if (player.TryGetComponent(out PlayerWeaponController weaponController))
+            weaponController.BindReloadService(reloadService);
+        
         // 플레이어 → UI뿐 아니라 UI → 플레이어도 연결합니다.
         crosshair.player = player;
 
