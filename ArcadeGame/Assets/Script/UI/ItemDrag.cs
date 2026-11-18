@@ -209,15 +209,37 @@ public class ItemDrag : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDrag
             CancelDrag();
             return;
         }
+
         if (!_isDragging)
             return;
 
+        GameObject hitObject = eventData.pointerCurrentRaycast.gameObject;
+
+        WeaponMagazineDropTarget weaponTarget = null;
+
+        if (hitObject != null)
+            weaponTarget = hitObject.GetComponentInParent<WeaponMagazineDropTarget>();
+        
+
+        // 무기 슬롯에 드롭한 경우
+        if (weaponTarget != null)
+        {
+            // 예약 검사가 가능하도록 드래그를 먼저 종료합니다.
+            // 회전 미리보기와 화면 위치도 기존 확정 상태로 복구합니다.
+            CancelDrag();
+
+            // 성공하면 원래 위치에서 예약된 상태로 재장전을 기다립니다.
+            // 실패하면 원래 위치에 그대로 남습니다.
+            weaponTarget.TryAcceptItem(this);
+            return;
+        }
+
+        // 일반 인벤토리 그리드에 드롭한 경우
         InventoryGrid targetGrid = null;
 
-        // 매 프레임이 아니라 드롭한 순간에 대상 보관함을 찾습니다.
-        if (eventData.pointerEnter != null)
+        if (hitObject != null)
         {
-            targetGrid = eventData.pointerEnter.GetComponentInParent<InventoryGrid>();
+            targetGrid = hitObject.GetComponentInParent<InventoryGrid>();
         }
 
         bool placed = false;
@@ -226,8 +248,10 @@ public class ItemDrag : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDrag
 
         if (targetGrid != null && targetGrid.isActiveAndEnabled && targetGrid.ContainerRect != null && RectTransformUtility.RectangleContainsScreenPoint( targetGrid.ContainerRect, eventData.position, eventData.pressEventCamera))
         {
-            Vector2 targetPosition = targetGrid.ContainerRect.InverseTransformPoint(_rect.position);
+            Vector2 targetPosition = targetGrid.ContainerRect.InverseTransformPoint( _rect.position);
+
             Vector2Int cell = targetGrid.GetIndexFromPosition(targetPosition);
+
             placed = targetGrid.TryPlaceItem( this, cell.x, cell.y, _previewWidth, _previewHeight);
         }
 

@@ -38,7 +38,8 @@ public sealed class PlayerSceneBindings : MonoBehaviour
 
         if (!player.InitializeSceneReferences(gameplayCamera,crosshair, aimCameraTarget))
             return false;
-
+        if (reloadService != null)
+            reloadService.BindPlayer(player);
         if (player.TryGetComponent(out PlayerWeaponController weaponController))
             weaponController.BindReloadService(reloadService);
         

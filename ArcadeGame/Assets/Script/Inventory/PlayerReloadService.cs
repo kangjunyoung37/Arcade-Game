@@ -3,11 +3,19 @@ using UnityEngine;
 [DisallowMultipleComponent]
 public sealed class PlayerReloadService : MonoBehaviour
 {
+    [Header("Manual Reload")]
+    [SerializeField] private InventoryContainer[] manualReloadContainers;
+   
+    [Header("Inventory UI")]
+    [SerializeField]private GameObject inventoryWindow;
+
     [SerializeField] private MagazineInventoryPresenter presenter;
 
     [Tooltip("빠른 재장전에 사용할 리그와 주머니를 연결합니다.")]
     [SerializeField] private InventoryContainer[] quickReloadContainers;
-
+    private Character _boundPlayer;
+    private PlayerWeapon _boundWeapon;
+    public bool IsInventoryOpen => inventoryWindow != null && inventoryWindow.activeInHierarchy;
     private void Start()
     {
         if (presenter == null || presenter.Inventory == null)
@@ -123,7 +131,90 @@ public sealed class PlayerReloadService : MonoBehaviour
 
         return null;
     }
+    public void BindPlayer(Character player)
+    {
+        _boundPlayer = player;
+        _boundWeapon = null;
 
+        if (player != null)
+            player.TryGetComponent(out _boundWeapon);
+    }
+    public bool TryStartManualReload(ItemDrag selectedDrag)
+    {
+        if (!isActiveAndEnabled ||
+            !IsInventoryOpen ||
+            presenter == null ||
+            presenter.Inventory == null ||
+            manualReloadContainers == null ||
+            selectedDrag == null ||
+            selectedDrag.IsDragging ||
+            _boundPlayer == null ||
+            !_boundPlayer.CanUseWeapon ||
+            _boundWeapon == null ||
+            !_boundWeapon.isActiveAndEnabled ||
+            _boundWeapon.Data == null ||
+            _boundWeapon.IsReloading ||
+            Time.timeScale <= 0f)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < presenter.BindingCount; i++)
+        {
+            if (!presenter.TryGetBoundItem( i, out MagazineItemInstance item, out MagazineItemView view, out ItemDrag drag))
+                continue;
+
+            if (drag != selectedDrag)
+                continue;
+
+            if (item.IsReserved || ReferenceEquals(item, _boundWeapon.EquippedMagazine) || !_boundWeapon.Data.IsMagazineCompatible(item.Data))
+                return false;
+            
+            InventoryContainer sourceContainer = FindManualReloadContainer(drag._myGrid);
+
+            // 등록된 플레이어 보관함의 탄창만 허용합니다.
+            if (sourceContainer == null)
+                return false;
+
+            // 우선 선택한 탄창이 있던 보관함으로 반환합니다.
+            if (_boundWeapon.TryStartInventoryReload( presenter.Inventory, i, view, drag, sourceContainer))           
+                return true;
+            
+            // 반환 공간이 없으면 다른 허용 보관함을 시도합니다.
+            for (int containerIndex = 0; containerIndex < manualReloadContainers.Length; containerIndex++)
+            {
+                InventoryContainer container = manualReloadContainers[containerIndex];
+
+                if (container == null || container == sourceContainer)
+                    continue;
+
+                if (_boundWeapon.TryStartInventoryReload( presenter.Inventory, i, view, drag, container))
+                    return true;
+            }
+
+            // 수동 선택이므로 다른 탄창으로 바꾸어 시도하지 않습니다.
+            return false;
+        }
+
+        return false;
+    }
+
+    private InventoryContainer FindManualReloadContainer(
+        InventoryGrid grid)
+    {
+        if (grid == null || manualReloadContainers == null)
+            return null;
+
+        for (int i = 0; i < manualReloadContainers.Length; i++)
+        {
+            InventoryContainer container = manualReloadContainers[i];
+
+            if (container != null && container.ContainsGrid(grid))
+                return container;
+        }
+
+        return null;
+    }
     [System.Diagnostics.Conditional("UNITY_EDITOR")]
     [System.Diagnostics.Conditional("DEVELOPMENT_BUILD")]
     private void ReportMissingReferences()

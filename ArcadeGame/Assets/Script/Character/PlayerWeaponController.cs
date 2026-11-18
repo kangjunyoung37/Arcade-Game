@@ -91,7 +91,11 @@ public sealed class PlayerWeaponController : MonoBehaviour
             CancelBurst(now);
             return;
         }
-
+        if (_reloadService != null && _reloadService.IsInventoryOpen)
+        {
+            CancelBurst(now);
+            return;
+        }
         if (now < _nextShotTime)
             return;
 
