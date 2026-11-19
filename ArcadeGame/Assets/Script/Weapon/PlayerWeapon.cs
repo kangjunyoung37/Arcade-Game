@@ -22,11 +22,18 @@ public sealed class PlayerWeapon : MonoBehaviour
     private MagazineItemInstance _equippedMagazine;
     private AmmoChamber _chamber;
     private WeaponData _initializedWeapon;
+    private MagazineItemInstance _publishedMagazine;
     private readonly MagazineReloadReservation _inventoryReload = new MagazineReloadReservation();
+    private int _publishedMagazineCount;
+    private int _publishedCapacity;
+    private int _publishedChamberCount;
     private float _lastFireTime = float.NegativeInfinity;
     private float _reloadDuration;
     private float _remainingReloadTime;
     private bool _usesInventoryReload;
+    private bool _hasPublishedState;
+    private bool _publishedReloading;
+    private bool _publishedEnabled;
     public WeaponData Data => weaponData;
     public float CurrentSpread { get; private set; }
     public float ReloadProgress => IsReloading && _reloadDuration > 0f ? Mathf.Clamp01(1f - _remainingReloadTime / _reloadDuration) : 0f;
@@ -48,7 +55,7 @@ public sealed class PlayerWeapon : MonoBehaviour
 
     // 발사 위치, 이번 발사에 사용한 탄퍼짐
     public event Action<Vector3, float> Fired;
-
+    public event Action StateChanged;
     private void Awake()
     {
         SynchronizeWeaponData();
@@ -75,8 +82,42 @@ public sealed class PlayerWeapon : MonoBehaviour
         SynchronizeWeaponData();
         RecoverSpread();
     }
+    private void LateUpdate()
+    {
+        PublishStateIfChanged();
+    }
+    
+    private void PublishStateIfChanged()
+    {
+        int magazineCount = MagazineCount;
+        int capacity = _equippedMagazine != null ? _equippedMagazine.Capacity : 0;
 
+        int chamberCount = ChamberCount;
+        bool reloading = IsReloading;
+        bool weaponEnabled = isActiveAndEnabled;
 
+        if (_hasPublishedState &&
+            ReferenceEquals(_publishedMagazine, _equippedMagazine) &&
+            _publishedMagazineCount == magazineCount &&
+            _publishedCapacity == capacity &&
+            _publishedChamberCount == chamberCount &&
+            _publishedReloading == reloading &&
+            _publishedEnabled == weaponEnabled)
+        {
+            return;
+        }
+
+        // 이벤트 호출 전에 비교용 상태를 저장합니다.
+        _hasPublishedState = true;
+        _publishedMagazine = _equippedMagazine;
+        _publishedMagazineCount = magazineCount;
+        _publishedCapacity = capacity;
+        _publishedChamberCount = chamberCount;
+        _publishedReloading = reloading;
+        _publishedEnabled = weaponEnabled;
+
+        StateChanged?.Invoke();
+    }
     //무기 데이터가 변경되면 새 무기의 기본 탄퍼짐을 적용합니다.
     private void SynchronizeWeaponData()
     {
@@ -85,7 +126,6 @@ public sealed class PlayerWeapon : MonoBehaviour
         _trackedWeapon = weaponData;
         CurrentSpread = weaponData != null ? Mathf.Max(0f, weaponData.baseSpread) : 0f;
     }
-
 
     //마지막 발사 이후 일정 시간이 지나면 탄퍼짐을 회복합니다.
     private void RecoverSpread()
@@ -405,6 +445,7 @@ public sealed class PlayerWeapon : MonoBehaviour
     private void OnDisable()
     {
         CancelReload();
+        PublishStateIfChanged();
     }
     // 탄약 구경뿐 아니라 탄창의 결합 규격도 검사합니다.
     private bool IsCompatibleMagazine(MagazineItemInstance magazine)
