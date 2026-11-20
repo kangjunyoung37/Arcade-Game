@@ -9,6 +9,10 @@ using Random = UnityEngine.Random;
 [RequireComponent(typeof(CharacterController))]
 public class Character : MonoBehaviour
 {
+    private const string RunInputName = "Run";
+    private const int AimMouseButton = 1;
+    private const float AimRayDistance = 100f;
+    private const float MinimumLookDirectionSqrMagnitude = 0.01f;
 
     [Header("CrossHair")]
     public Crosshair crosshair;
@@ -46,7 +50,8 @@ public class Character : MonoBehaviour
 
     [SerializeField, Min(0.1f)]
     private float footstepDistance = 1.5f;
-
+    [Header("Reload Movement")]
+    [SerializeField, Range(0f, 1f)] private float reloadMoveSpeedMultiplier = 0.5f;
     private Vector3 _lastFootstepPosition;
     private float _accumulatedFootstepDistance;
     //Component
@@ -65,7 +70,7 @@ public class Character : MonoBehaviour
     private float _rotateSpeed = 15f;
     private float _lastDodgeTime;
     public bool CanUseWeapon => isActiveAndEnabled &&_sceneReferencesBound && !_isRunning && !_isDodging;
-
+    private bool IsReloading => _playerWeapon != null && _playerWeapon.IsReloading;
     private void Awake()
     {
         _health = GetComponent<HealthSystem>();
@@ -103,9 +108,7 @@ public class Character : MonoBehaviour
     
     private void Update()
     {
-
-        Aiming();
-        Running();
+        UpdateMovementState();
         if (crosshair is not null)
         {
             crosshair.SetAiming(_isAiming);
@@ -165,7 +168,7 @@ public class Character : MonoBehaviour
         camRight.y = 0f;
         camForward.Normalize();
         camRight.Normalize();
-        _moveDirection = (camForward * v) + (camRight * h).normalized;
+        _moveDirection = Vector3.ClampMagnitude(camForward * v + camRight * h, 1f);
         if (_characterControllercc.isGrounded && _velocityY < 0)
         {
             _velocityY = -2f;
@@ -178,35 +181,44 @@ public class Character : MonoBehaviour
 
     private void HandleAimAndCamera()
     {
+        if (mainCamera == null)
+            return;
+
         Vector3 targetLookDirection = Vector3.zero;
-        Vector3 targetCamPos = transform.position; 
-        
+        Vector3 targetCameraPosition = transform.position;
+
         Ray ray = mainCamera.ScreenPointToRay(Input.mousePosition);
-        if (Physics.Raycast(ray, out RaycastHit hit, 100f, groundLayer))
+
+        if (Physics.Raycast( ray, out RaycastHit hit, AimRayDistance, groundLayer))
         {
             Vector3 hitPoint = hit.point;
             hitPoint.y = transform.position.y;
-           
-            targetLookDirection = hitPoint - transform.position;
-            
-            Vector3 dir = hitPoint - transform.position;
-            Vector3 clampedDir = Vector3.ClampMagnitude(dir, aimCameraDistance); 
-            targetCamPos = transform.position + clampedDir;
+
+            Vector3 direction = hitPoint - transform.position;
+
+            targetLookDirection = direction;
+
+            if (!IsReloading)
+            {
+                targetCameraPosition += Vector3.ClampMagnitude( direction, aimCameraDistance);
+            }
         }
-        
-        if(_isRunning)
-            targetLookDirection = _moveDirection; 
-        
-        targetLookDirection.y = 0f; 
-        if (targetLookDirection.magnitude > 0.1f)
+
+        if (_isRunning)
+            targetLookDirection = _moveDirection;
+
+        targetLookDirection.y = 0f;
+
+        if (targetLookDirection.sqrMagnitude > MinimumLookDirectionSqrMagnitude)
         {
             Quaternion targetRotation = Quaternion.LookRotation(targetLookDirection);
-            transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, _rotateSpeed * Time.deltaTime);
+
+            transform.rotation = Quaternion.Slerp( transform.rotation, targetRotation, _rotateSpeed * Time.deltaTime);
         }
-        
-        if (cameraTarget)
+
+        if (cameraTarget != null)
         {
-            cameraTarget.position = Vector3.Lerp(cameraTarget.position, targetCamPos, Time.deltaTime * aimCameraSpeed);
+            cameraTarget.position = Vector3.Lerp( cameraTarget.position, targetCameraPosition, aimCameraSpeed * Time.deltaTime);
         }
     }
   
@@ -240,35 +252,30 @@ public class Character : MonoBehaviour
 
     #endregion
 
-    private void Running()
+    private void UpdateMovementState()
     {
-        if (_isAiming) return;
-        
-        if (Input.GetButtonDown("Run"))
+        if (_isDodging)
         {
-            _currentSpeed = runspeed;
-            _isRunning = true;
+            _isAiming = false;
+            _isRunning = false;
+            _currentSpeed = normalspeed;
+            return;
         }
 
-        if (Input.GetButtonUp("Run"))
+        if (IsReloading)
         {
-            _currentSpeed = normalspeed;
+            _isAiming = false;
             _isRunning = false;
-        }
-    }
 
-    private void Aiming()
-    {
-        _isAiming = Input.GetMouseButton(1);
-        if (_isAiming)
-        {
-            _isRunning = false;
-            _currentSpeed = aimingSpeed;
+            _currentSpeed = normalspeed * reloadMoveSpeedMultiplier;
+            return;
         }
-        else
-        {
-            _currentSpeed = normalspeed;
-        }
+
+        _isAiming = Input.GetMouseButton(AimMouseButton);
+
+        // 조준 중에는 달리지 않습니다.
+        _isRunning = !_isAiming && Input.GetButton(RunInputName);
+        _currentSpeed = _isAiming ? aimingSpeed : _isRunning ? runspeed : normalspeed;
     }
     
     private void UpdateFootstepNoise()
