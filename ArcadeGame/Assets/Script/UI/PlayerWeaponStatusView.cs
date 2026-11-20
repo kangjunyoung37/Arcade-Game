@@ -5,36 +5,44 @@ using UnityEngine.UI;
 [DisallowMultipleComponent]
 public sealed class PlayerWeaponStatusView : MonoBehaviour
 {
-    private const string MagazineCountFormat = "{0}/{1}";
-    private const string ChamberCountFormat = "약실 {0}";
-    private const string ReloadPercentFormat = "{0}%";
-
+    private const int TimeDisplayStepsPerSecond = 10;
+    private const float FullCycleRadians = Mathf.PI * 2f;
     private const string NoWeaponText = "무기 없음";
     private const string NoMagazineText = "탄창 없음";
     private const string EmptyCountText = "-";
-    private const int PercentScale = 100;
 
     [Header("Player Source")]
     [SerializeField] private GameManager gameManager;
 
-    [Header("Magazine")]
-    [SerializeField] private Image magazineIcon;
-    [SerializeField] private TMP_Text magazineNameText;
-    [SerializeField] private TMP_Text magazineCountText;
-    [SerializeField] private TMP_Text chamberCountText;
+    [Header("Weapon")]
+    [SerializeField] private TMP_Text weaponNameText;
 
     [Header("Reload")]
     [SerializeField] private GameObject reloadRoot;
     [SerializeField] private Image reloadFill;
-    [SerializeField] private TMP_Text reloadPercentText;
     
     [Header("Visibility")]
     [SerializeField] private UIController inventoryUI;
     [SerializeField] private bool hideReloadWhenInventoryOpen;
 
+    [Header("Remaining Time")]
+    [SerializeField] private TMP_Text reloadRemainingText;
+
+    [Header("Reload Blink")]
+    [SerializeField] private CanvasGroup reloadBlinkTarget;
+    [SerializeField, Range(0.1f, 1f)] private float minimumBlinkAlpha = 0.35f;
+    [SerializeField, Min(0.1f)] private float blinkCyclesPerSecond = 1.5f;
+
     private PlayerWeapon _weapon;
     private bool _lastUsableWeapon;
-    private int _lastReloadPercent = -1;
+    private int _lastRemainingTenths = -1;
+    private float _blinkBaseAlpha = 1f;
+
+    private void Awake()
+    {
+        if (reloadBlinkTarget != null)
+            _blinkBaseAlpha = reloadBlinkTarget.alpha;
+    }
 
     private void OnEnable()
     { 
@@ -59,8 +67,9 @@ public sealed class PlayerWeaponStatusView : MonoBehaviour
     }
 
     private void OnDisable()
-    {
-
+    {   
+        
+        RestoreReloadBlink();
         if (!ReferenceEquals(inventoryUI, null))
             inventoryUI.InventoryOpenStateChanged -= HandleInventoryVisibility;
         if (!ReferenceEquals(gameManager, null))
@@ -68,6 +77,32 @@ public sealed class PlayerWeaponStatusView : MonoBehaviour
 
         UnsubscribeWeapon();
         _weapon = null;
+    }
+
+    private void RefreshReloadBlink()
+    {
+        if (reloadBlinkTarget == null || _weapon == null)
+            return;
+
+        float phase = _weapon.ReloadElapsedSeconds * blinkCyclesPerSecond * FullCycleRadians;
+        // 밝음 → 어두움 → 밝음으로 부드럽게 반복합니다.
+        float wave = (Mathf.Cos(phase) + 1f) * 0.5f;
+
+        float alpha = _blinkBaseAlpha * Mathf.Lerp(minimumBlinkAlpha, 1f, wave);
+
+        if (!Mathf.Approximately(reloadBlinkTarget.alpha, alpha))
+            reloadBlinkTarget.alpha = alpha;
+    }
+
+    private void RestoreReloadBlink()
+    {
+        if (reloadBlinkTarget == null)
+            return;
+
+        if (!Mathf.Approximately(reloadBlinkTarget.alpha, _blinkBaseAlpha))
+        {
+            reloadBlinkTarget.alpha = _blinkBaseAlpha;
+        }
     }
 
     private void HandleCharacterChanged(Character player)
@@ -102,17 +137,26 @@ public sealed class PlayerWeaponStatusView : MonoBehaviour
 
     private void LateUpdate()
     {
-        bool usable =
-            _weapon != null && _weapon.isActiveAndEnabled;
+        bool usable = _weapon != null && _weapon.isActiveAndEnabled;
 
-        // 무기 컴포넌트가 제거되는 상황도 화면에 반영합니다.
         if (usable != _lastUsableWeapon)
         {
             RefreshState();
             return;
         }
 
-        if (usable && _weapon.IsReloading)
+        bool hiddenByInventory = hideReloadWhenInventoryOpen && inventoryUI != null && inventoryUI.IsInventoryOpen;
+        bool showReload = usable && _weapon.IsReloading && !hiddenByInventory;
+
+        if (!showReload)
+        {
+            RestoreReloadBlink();
+            return;
+        }
+
+        RefreshReloadBlink();
+
+        if (reloadRoot != null && reloadRoot.activeInHierarchy)
             RefreshReloadProgress();
     }
 
@@ -121,48 +165,16 @@ public sealed class PlayerWeaponStatusView : MonoBehaviour
         bool usable = _weapon != null && _weapon.isActiveAndEnabled;
 
         _lastUsableWeapon = usable;
+        WeaponData weaponData = usable ? _weapon.Data : null;
 
-        MagazineItemInstance magazine = usable ? _weapon.EquippedMagazine : null;
-
-        MagazineData data = magazine != null ? magazine.Data : null;
-
-        if (magazineIcon != null)
+        if (weaponNameText != null)
         {
-            Sprite sprite = data != null ? data.Icon : null;
+            string displayName = weaponData != null
+                ? weaponData.weaponName
+                : NoWeaponText;
 
-            if (magazineIcon.sprite != sprite)
-                magazineIcon.sprite = sprite;
-
-            bool showIcon = sprite != null;
-
-            if (magazineIcon.enabled != showIcon)
-                magazineIcon.enabled = showIcon;
+            weaponNameText.SetText(displayName);
         }
-
-        if (magazineNameText != null)
-        {
-            string name = !usable ? NoWeaponText : data != null ? data.DisplayName : NoMagazineText;
-
-            magazineNameText.SetText(name);
-        }
-
-        if (magazineCountText != null)
-        {
-            if (magazine != null)
-            {
-                magazineCountText.SetText( MagazineCountFormat, magazine.RoundCount, magazine.Capacity);
-            }
-            else
-            {
-                magazineCountText.SetText(EmptyCountText);
-            }
-        }
-
-        if (chamberCountText != null)
-        {
-            chamberCountText.SetText(ChamberCountFormat, usable ? _weapon.ChamberCount : 0);
-        }
-
         bool hiddenByInventory = hideReloadWhenInventoryOpen && inventoryUI != null && inventoryUI.IsInventoryOpen;
 
         bool reloading = usable && _weapon.IsReloading && !hiddenByInventory;
@@ -172,22 +184,24 @@ public sealed class PlayerWeaponStatusView : MonoBehaviour
             reloadRoot.SetActive(reloading);
         }
 
-        _lastReloadPercent = -1;
+        _lastRemainingTenths = -1;
 
         if (reloading)
         {
             RefreshReloadProgress();
+            RefreshReloadBlink();
         }
         else
         {
+            RestoreReloadBlink();
+
             if (reloadFill != null)
                 reloadFill.fillAmount = 0f;
-
-            if (reloadPercentText != null)
-                reloadPercentText.SetText(string.Empty);
+                
+            if (reloadRemainingText != null)
+                reloadRemainingText.SetText(string.Empty);
         }
     }
-
     private void RefreshReloadProgress()
     {
         if (_weapon == null)
@@ -200,16 +214,6 @@ public sealed class PlayerWeaponStatusView : MonoBehaviour
             reloadFill.fillAmount = progress;
         }
 
-        int percent = Mathf.FloorToInt(progress * PercentScale);
-
-        // 퍼센트 숫자가 바뀌었을 때만 텍스트를 갱신합니다.
-        if (percent == _lastReloadPercent)
-            return;
-
-        _lastReloadPercent = percent;
-
-        if (reloadPercentText != null)
-            reloadPercentText.SetText(ReloadPercentFormat, percent);
     }
     private void HandleInventoryVisibility(bool isOpen)
     {

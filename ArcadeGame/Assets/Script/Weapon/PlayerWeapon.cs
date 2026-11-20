@@ -37,6 +37,8 @@ public sealed class PlayerWeapon : MonoBehaviour
     public WeaponData Data => weaponData;
     public float CurrentSpread { get; private set; }
     public float ReloadProgress => IsReloading && _reloadDuration > 0f ? Mathf.Clamp01(1f - _remainingReloadTime / _reloadDuration) : 0f;
+    public float ReloadRemainingSeconds => IsReloading ? Mathf.Max(0f, _remainingReloadTime) :  0f; 
+    public float ReloadElapsedSeconds => IsReloading? Mathf.Clamp( _reloadDuration - _remainingReloadTime, 0f, _reloadDuration) : 0f;
     public bool HasMagazine => _equippedMagazine != null;
     public int MagazineCount => _equippedMagazine != null ? _equippedMagazine.RoundCount : 0;
     // 장착된 탄창의 ID와 데이터를 확인할 때 사용합니다.
