@@ -116,6 +116,23 @@ public sealed class MagazineInventory : MonoBehaviour
 
         return item.TryLoadOneFrom(_looseAmmo);
     }
+
+    //예약된 탄창에 한 발 넣기
+    public bool TryLoadOneIntoReserved( int index, MagazineItemInstance expectedItem, object reservationOwner)
+    {
+        if (reservationOwner == null ||expectedItem == null || _looseAmmo == null)
+            return false;
+        
+        // 인덱스만 같고 실제 탄창이 교체된 경우를 막습니다.
+        if (!TryGetItem(index, out MagazineItemInstance currentItem) || !ReferenceEquals(currentItem, expectedItem))
+            return false;
+        
+        // 이 작업이 실제로 예약한 탄창인지 확인합니다.
+        if (!currentItem.IsReservedBy(reservationOwner))
+            return false;
+
+        return currentItem.TryLoadOneFrom( _looseAmmo, reservationOwner);
+    }
     // 예약된 탄창을 교환해도 되는지 검사합니다.
     // 검사만 수행하며 배열은 변경하지 않습니다.
     internal bool CanReplaceReservedItem(int index, MagazineItemInstance expected, MagazineItemInstance replacement, object owner)
@@ -154,6 +171,23 @@ public sealed class MagazineInventory : MonoBehaviour
         Debug.LogError( $"시작 탄창 설정 오류: 인덱스 {index}. " + "탄창 설정, 탄약 구경, 지급 수량을 확인하세요.", this);
     }
 
+    /// <summary>
+/// 지정한 탄창에 현재 보유한 낱개 탄약을 넣을 수 있는지 확인합니다.
+/// 수량을 변경하거나 예약하지는 않습니다.
+/// </summary>
+    public bool CanSupplyOneRoundTo( int index, MagazineItemInstance expectedItem)
+    {
+        if (expectedItem == null || _looseAmmo == null || _looseAmmo.IsEmpty || _looseAmmo.Ammo == null)
+            return false;
+        
+        if (!TryGetItem(index, out MagazineItemInstance currentItem) || !ReferenceEquals(currentItem, expectedItem))
+            return false;
+        
+        if (currentItem.IsFull || currentItem.Data == null)
+            return false;
+
+        return _looseAmmo.Ammo.caliber == currentItem.Data.Caliber;
+    }
 #if UNITY_EDITOR
     [ContextMenu("Debug/Load One Into First Magazine")]
     private void DebugLoadOne()
@@ -168,6 +202,37 @@ public sealed class MagazineInventory : MonoBehaviour
             this);
     }
 
+    [ContextMenu("Debug/Load One Into Reserved First Magazine")]
+    private void DebugLoadOneIntoReservedMagazine()
+    {
+        if (!Application.isPlaying)
+            return;
+
+        if (_debugReservedMagazine == null)
+        {
+            Debug.LogWarning(
+                "먼저 Reserve First Magazine을 실행하세요.",
+                this);
+
+            return;
+        }
+
+        const int firstMagazineIndex = 0;
+
+        int looseBefore = LooseRoundCount;
+        int magazineBefore = _debugReservedMagazine.RoundCount;
+
+        bool loaded = TryLoadOneIntoReserved(
+            firstMagazineIndex,
+            _debugReservedMagazine,
+            _debugItemReservationOwner);
+
+        Debug.Log(
+            $"예약 소유자 삽입: {loaded}, " +
+            $"낱개: {looseBefore} → {LooseRoundCount}, " +
+            $"탄창: {magazineBefore} → {_debugReservedMagazine.RoundCount}",
+            this);
+    }
     [ContextMenu("Debug/Print Magazine Identities")]
     private void DebugPrintIdentities()
     {
