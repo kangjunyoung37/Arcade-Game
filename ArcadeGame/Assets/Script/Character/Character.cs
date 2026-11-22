@@ -9,6 +9,11 @@ using Random = UnityEngine.Random;
 [RequireComponent(typeof(CharacterController))]
 public class Character : MonoBehaviour
 {
+    private const string RunInputName = "Run";
+    private const int AimMouseButton = 1;
+    private const float AimRayDistance = 100f;
+    private const float MinimumLookDirectionSqrMagnitude = 0.01f;
+
     [Header("CrossHair")]
     public Crosshair crosshair;
     public LayerMask groundLayer;
@@ -22,15 +27,6 @@ public class Character : MonoBehaviour
     public float runspeed = 12f;
     private float _currentSpeed = 8f;
     public float aimingSpeed = 4f;
-    
-    [Header("Shoot Settings")]
-    private float _lastFireTime;
-    private bool _isCooldown = false;
-
-    [Header("Shoot Test")]
-    public Transform bulletSpawnPoint;
-    public WeaponData currentWeaponData;
-    
     //조준시 카메라 설정
     [Header("Camera Aim")] 
     public Transform cameraTarget;
@@ -54,77 +50,113 @@ public class Character : MonoBehaviour
 
     [SerializeField, Min(0.1f)]
     private float footstepDistance = 1.5f;
-
+    [Header("Reload Movement")]
+    [SerializeField, Range(0f, 1f)] private float reloadMoveSpeedMultiplier = 0.5f;
     private Vector3 _lastFootstepPosition;
     private float _accumulatedFootstepDistance;
     //Component
     private HealthSystem _health;
-    private MainCamera _mainCamera;
     private Camera mainCamera;
     private CharacterController _characterControllercc;
     private CinemachineImpulseSource _impulseSource;
+    private PlayerWeapon _playerWeapon;
     
     //Variable
     private bool _isAiming = false;
+    private bool _sceneReferencesBound;
+    private bool _isRunning = false;
+    private bool _isDodging = false;
     private Vector3 _moveDirection;
     private float _rotateSpeed = 15f;
-    private bool _isDodging = false;
     private float _lastDodgeTime;
-    private bool _isRunning = false;
-    public float CurrentSpread { get; private set; }
-
+    public bool CanUseWeapon => isActiveAndEnabled &&_sceneReferencesBound && !_isRunning && !_isDodging;
+    private bool IsReloading => _playerWeapon != null && _playerWeapon.IsReloading;
     private void Awake()
     {
         _health = GetComponent<HealthSystem>();
         _characterControllercc = GetComponent<CharacterController>();
         _impulseSource = GetComponent<CinemachineImpulseSource>();
+        _playerWeapon = GetComponent<PlayerWeapon>();
         if (_health is not null)
         {
             _health.onDied += HandleDeath;
         }
     }
+    private void OnEnable()
+    {
+        if (_playerWeapon != null)
+            _playerWeapon.Fired += HandleWeaponFired;
+    }
 
+    private void OnDisable()
+    {
+        if (_playerWeapon != null)
+            _playerWeapon.Fired -= HandleWeaponFired;
+    }
     private void Start()
     {
-        mainCamera = Camera.main;
-        _mainCamera = mainCamera.GetComponent<MainCamera>();
-        if (currentWeaponData is not null)
+        if (!_sceneReferencesBound)
         {
-            CurrentSpread = currentWeaponData.baseSpread;
+    #if UNITY_EDITOR || DEVELOPMENT_BUILD
+            Debug.LogError("플레이어의 씬 참조가 초기화되지 않았습니다. " + "PlayerSpawnManager를 통해 생성해 주세요.", this);
+    #endif
+            enabled = false;
+            return;
         }
         _lastFootstepPosition = transform.position;
     }
     
     private void Update()
     {
-
-        Aiming();
-        Running();
+        UpdateMovementState();
         if (crosshair is not null)
         {
             crosshair.SetAiming(_isAiming);
         }
-        
-        TryFire();
+
         if (!_isDodging)
         {
             CharacterMovement();
             HandleAimAndCamera();
         }
-        HandleSpreadRecovery();
         Dodge();
-        RotateItem();
         UpdateFootstepNoise();
     }
 
+
+    public bool InitializeSceneReferences( Camera gameplayCamera,Crosshair sceneCrosshair, Transform sceneAimTarget)
+    {
+        if (gameplayCamera == null ||
+            sceneCrosshair == null ||
+            sceneAimTarget == null)
+        {
+    #if UNITY_EDITOR || DEVELOPMENT_BUILD
+            Debug.LogError("플레이어의 카메라, 크로스헤어, 조준 카메라 타깃 연결이 필요합니다.", this);
+    #endif
+            return false;
+        }
+
+        mainCamera = gameplayCamera;
+        crosshair = sceneCrosshair;
+        cameraTarget = sceneAimTarget;
+
+        cameraTarget.position = transform.position;
+
+        _lastFootstepPosition = transform.position;
+        _accumulatedFootstepDistance = 0f;
+
+        _sceneReferencesBound = true;
+        return true;
+    }
     private void OnDestroy()
     {
-        if (_health is not null)
-        {
+        if (_health != null)
             _health.onDied -= HandleDeath;
-        }
-    }
 
+        if (GameManager.Instance != null)
+            GameManager.Instance.UnregisterCharacter(this);
+    }
+    
     private void CharacterMovement()
     {
         float h = Input.GetAxisRaw("Horizontal");
@@ -136,7 +168,7 @@ public class Character : MonoBehaviour
         camRight.y = 0f;
         camForward.Normalize();
         camRight.Normalize();
-        _moveDirection = (camForward * v) + (camRight * h).normalized;
+        _moveDirection = Vector3.ClampMagnitude(camForward * v + camRight * h, 1f);
         if (_characterControllercc.isGrounded && _velocityY < 0)
         {
             _velocityY = -2f;
@@ -149,131 +181,47 @@ public class Character : MonoBehaviour
 
     private void HandleAimAndCamera()
     {
+        if (mainCamera == null)
+            return;
+
         Vector3 targetLookDirection = Vector3.zero;
-        Vector3 targetCamPos = transform.position; 
-        
+        Vector3 targetCameraPosition = transform.position;
+
         Ray ray = mainCamera.ScreenPointToRay(Input.mousePosition);
-        if (Physics.Raycast(ray, out RaycastHit hit, 100f, groundLayer))
+
+        if (Physics.Raycast( ray, out RaycastHit hit, AimRayDistance, groundLayer))
         {
             Vector3 hitPoint = hit.point;
             hitPoint.y = transform.position.y;
-           
-            targetLookDirection = hitPoint - transform.position;
-            
-            Vector3 dir = hitPoint - transform.position;
-            Vector3 clampedDir = Vector3.ClampMagnitude(dir, aimCameraDistance); 
-            targetCamPos = transform.position + clampedDir;
+
+            Vector3 direction = hitPoint - transform.position;
+
+            targetLookDirection = direction;
+
+            if (!IsReloading)
+            {
+                targetCameraPosition += Vector3.ClampMagnitude( direction, aimCameraDistance);
+            }
         }
-        
-        if(_isRunning)
-            targetLookDirection = _moveDirection; 
-        
-        targetLookDirection.y = 0f; 
-        if (targetLookDirection.magnitude > 0.1f)
+
+        if (_isRunning)
+            targetLookDirection = _moveDirection;
+
+        targetLookDirection.y = 0f;
+
+        if (targetLookDirection.sqrMagnitude > MinimumLookDirectionSqrMagnitude)
         {
             Quaternion targetRotation = Quaternion.LookRotation(targetLookDirection);
-            transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, _rotateSpeed * Time.deltaTime);
+
+            transform.rotation = Quaternion.Slerp( transform.rotation, targetRotation, _rotateSpeed * Time.deltaTime);
         }
-        
-        if (cameraTarget)
+
+        if (cameraTarget != null)
         {
-            cameraTarget.position = Vector3.Lerp(cameraTarget.position, targetCamPos, Time.deltaTime * aimCameraSpeed);
+            cameraTarget.position = Vector3.Lerp( cameraTarget.position, targetCameraPosition, aimCameraSpeed * Time.deltaTime);
         }
     }
-
-    #region Fire Code
-
-     private void HandleSpreadRecovery()
-    {
-        if (Time.time > _lastFireTime + currentWeaponData.fireRate * 1.5f)
-        {
-            CurrentSpread = Mathf.MoveTowards(CurrentSpread, currentWeaponData.baseSpread,
-                currentWeaponData.recoveryRate * Time.deltaTime);
-        }
-    }
-    private void TryFire()
-    {
-        if (_isCooldown || _isRunning || _isDodging) return;
-        switch (currentWeaponData.fireMode)
-        {
-            case FireMode.Single:
-                if (Input.GetMouseButtonDown(0))
-                {
-                    Fire();
-                    StartCoroutine(FireCooldown(currentWeaponData.singleFireDelay));
-                }
-                break;
-
-            case FireMode.Auto:
-                if (Input.GetMouseButton(0) && Time.time >= _lastFireTime + currentWeaponData.fireRate)
-                {
-                    Fire();
-                    _lastFireTime = Time.time;
-                }
-                break;
-
-            case FireMode.Burst:
-                if (Input.GetMouseButtonDown(0))
-                {
-                    StartCoroutine(BurstFireRoutine());
-                }
-                break;
-        }
-    }
-    
-    //Bullet Fire
-    private void Fire()
-    {
-        PlayerNoise.Emit( this,bulletSpawnPoint.position,gunshotNoiseRadius,PlayerNoiseType.Gunshot);
-        crosshair.AddSpread(CurrentSpread);
-        _impulseSource.GenerateImpulse();
-        GameObject casing = ObjectPoolManager.instance.GetGo("Casing");
-        GameObject bullet = ObjectPoolManager.instance.GetGo("Bullet");
-        //Test Casing
-        casing.transform.position = bulletSpawnPoint.position;
-        casing.transform.rotation = bulletSpawnPoint.rotation;
-        
-        var perfectDirection = (bulletSpawnPoint.right +  bulletSpawnPoint.up).normalized;
-        if (casing.TryGetComponent(out Casing casingComponent))
-            casingComponent.Eject(perfectDirection);
-        
-        float randowYaw = Random.Range(-CurrentSpread, CurrentSpread);
-        Quaternion spreadRotation = Quaternion.Euler(0, randowYaw, 0);
-        
-        bullet.transform.position = bulletSpawnPoint.position;
-        bullet.transform.rotation = bulletSpawnPoint.rotation * spreadRotation;
-        CurrentSpread += currentWeaponData.bloomPerShot;
-        CurrentSpread = Mathf.Clamp(CurrentSpread, currentWeaponData.baseSpread, currentWeaponData.maxSpread);
-        if (bullet.TryGetComponent(out Bullet b))
-        {
-            b.Init();
-        }
-        
-    }
-    
-    private IEnumerator FireCooldown(float delay)
-    {
-        _isCooldown = true;
-        yield return new WaitForSeconds(delay);
-        _isCooldown = false;
-    }
-
-    private IEnumerator BurstFireRoutine()
-    {
-        _isCooldown = true; 
-        for (int i = 0; i < currentWeaponData.burstCount; i++)
-        {
-            Fire();
-            yield return new WaitForSeconds(currentWeaponData.fireRate);
-        }
-        
-        yield return new WaitForSeconds(currentWeaponData.burstPostDelay);
-        _isCooldown = false;
-    }
-
-    #endregion
-   
-    
+  
     //Dodge
     #region Dodge
 
@@ -304,77 +252,75 @@ public class Character : MonoBehaviour
 
     #endregion
 
-    private void Running()
+    private void UpdateMovementState()
     {
-        if (_isAiming) return;
-        
-        if (Input.GetButtonDown("Run"))
+        if (_isDodging)
         {
-            _currentSpeed = runspeed;
-            _isRunning = true;
-        }
-
-        if (Input.GetButtonUp("Run"))
-        {
-            _currentSpeed = normalspeed;
+            _isAiming = false;
             _isRunning = false;
-        }
-    }
-
-    private void Aiming()
-    {
-        _isAiming = Input.GetMouseButton(1);
-        if (_isAiming)
-        {
-            _isRunning = false;
-            _currentSpeed = aimingSpeed;
-        }
-        else
-        {
             _currentSpeed = normalspeed;
+            return;
         }
-    }
 
-    private void RotateItem()
-    {
-        if (Input.GetKeyDown(KeyCode.R))
+        if (IsReloading)
         {
-            if (ItemDrag.CurrrentlyDraggedItem)
-            {
-                ItemDrag.CurrrentlyDraggedItem.RotateItem();
-            }
+            _isAiming = false;
+            _isRunning = false;
+
+            _currentSpeed = normalspeed * reloadMoveSpeedMultiplier;
+            return;
         }
+
+        _isAiming = Input.GetMouseButton(AimMouseButton);
+
+        // 조준 중에는 달리지 않습니다.
+        _isRunning = !_isAiming && Input.GetButton(RunInputName);
+        _currentSpeed = _isAiming ? aimingSpeed : _isRunning ? runspeed : normalspeed;
     }
-
-private void UpdateFootstepNoise()
-{
-    Vector3 currentPosition = transform.position;
-    Vector3 displacement = currentPosition - _lastFootstepPosition;
-    _lastFootstepPosition = currentPosition;
-
-    if (!_characterControllercc.isGrounded || _isDodging)
+    
+    private void UpdateFootstepNoise()
     {
-        _accumulatedFootstepDistance = 0f;
-        return;
+        Vector3 currentPosition = transform.position;
+        Vector3 displacement = currentPosition - _lastFootstepPosition;
+        _lastFootstepPosition = currentPosition;
+
+        if (!_characterControllercc.isGrounded || _isDodging)
+        {
+            _accumulatedFootstepDistance = 0f;
+            return;
+        }
+
+        displacement.y = 0f;
+
+        _accumulatedFootstepDistance += displacement.magnitude;
+
+        if (_accumulatedFootstepDistance < footstepDistance)
+        {
+            return;
+        }
+
+        _accumulatedFootstepDistance %= footstepDistance;
+
+        float radius = _isRunning
+            ? runNoiseRadius
+            : walkNoiseRadius;
+
+        PlayerNoise.Emit(this, currentPosition, radius, PlayerNoiseType.Footstep);
     }
-
-    displacement.y = 0f;
-
-    _accumulatedFootstepDistance += displacement.magnitude;
-
-    if (_accumulatedFootstepDistance < footstepDistance)
+    private void HandleWeaponFired(Vector3 shotPosition, float shotSpread)
     {
-        return;
+        PlayerNoise.Emit(
+            this,
+            shotPosition,
+            gunshotNoiseRadius,
+            PlayerNoiseType.Gunshot);
+
+        if (crosshair != null)
+            crosshair.AddSpread(shotSpread);
+
+        if (_impulseSource != null)
+            _impulseSource.GenerateImpulse();
     }
-
-    _accumulatedFootstepDistance %= footstepDistance;
-
-    float radius = _isRunning
-        ? runNoiseRadius
-        : walkNoiseRadius;
-
-    PlayerNoise.Emit(this, currentPosition, radius, PlayerNoiseType.Footstep);
-}
     private void HandleDeath()
     {
         Debug.Log("죽음");

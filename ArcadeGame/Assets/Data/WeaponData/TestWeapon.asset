@@ -12,15 +12,24 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a05d8cc0d7c01a549b543d85ab186510, type: 3}
   m_Name: TestWeapon
   m_EditorClassIdentifier: 
-  weaponName: 
+  weaponName: AK-47
+  category: 0
+  caliber: {fileID: 11400000, guid: 03b52885dbe2f084fb7a540cf11ce0ca, type: 2}
+  magazinePattern: {fileID: 11400000, guid: 5b7da73370e5cbb44b7ff0326029bb01, type: 2}
+  actionType: 0
   fireMode: 1
+  additionalFireModes: 
   fireRate: 0.1
   singleFireDelay: 0.2
-  burstPostDelay: 0.5
+  burstShotInterval: 0.1
   burstCount: 3
+  burstPostDelay: 0.5
+  actionCycleTime: 0.8
   baseSpread: 0.2
   maxSpread: 10
   bloomPerShot: 0.2
   recoveryRate: 10
-  reloadTime: 0
-  magazineSize: 0
+  reloadType: 0
+  magazineSize: 1
+  reloadTime: 3
+  insertRoundTime: 0.6

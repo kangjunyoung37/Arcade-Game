@@ -1,0 +1,319 @@
+using System;
+using UnityEngine;
+
+[DisallowMultipleComponent]
+public sealed class MagazineInventory : MonoBehaviour
+{
+    [Serializable]
+    private sealed class StartingMagazine
+    {
+        public MagazineData data;
+        public BulletData ammo;
+
+        [Min(0)]
+        public int rounds;
+    }
+
+    [Header("Starting Magazines")]
+    [SerializeField] private StartingMagazine[] startingMagazines;
+
+    [Header("Loose Ammunition")]
+    [SerializeField] private BulletData looseAmmoData;
+
+    [SerializeField, Min(0)] private int startingLooseRounds = 10;
+
+    private MagazineItemInstance[] _items;
+    private LooseAmmoStack _looseAmmo;
+    private bool _initialized;
+
+    public int ItemCount => _items != null ? _items.Length : 0;
+
+    public int LooseRoundCount => _looseAmmo != null ? _looseAmmo.Count : 0;
+
+    private void Awake()
+    {
+        EnsureInitialized();
+    }
+
+    /// <summary>
+    /// 시작 장비를 한 번만 생성합니다.
+    /// UI에서 먼저 호출해도 중복 생성하지 않습니다.
+    /// </summary>
+    public void EnsureInitialized()
+    {
+        if (_initialized)
+            return;
+
+        _initialized = true;
+
+        int count = startingMagazines != null ? startingMagazines.Length : 0;
+
+        _items = new MagazineItemInstance[count];
+
+        // 시작 장비 생성 시에만 객체와 탄약 배열을 할당합니다.
+        for (int i = 0; i < count; i++)
+        {
+            StartingMagazine entry = startingMagazines[i];
+
+            if (entry == null || entry.data == null || !entry.data.IsValid || entry.rounds < 0 || entry.rounds > entry.data.Capacity)
+            {
+                ReportInvalidEntry(i);
+                continue;
+            }
+
+            if (entry.rounds > 0 && (entry.ammo == null || entry.ammo.caliber != entry.data.Caliber))
+            {
+                ReportInvalidEntry(i);
+                continue;
+            }
+
+            MagazineItemInstance item = new MagazineItemInstance(entry.data);
+
+            if (entry.rounds > 0)
+            {
+                // 시작 지급량을 탄창으로 옮깁니다.
+                LooseAmmoStack initialSupply = new LooseAmmoStack(entry.ammo, entry.rounds);
+
+                for (int round = 0; round < entry.rounds; round++)
+                    item.TryLoadOneFrom(initialSupply);
+            }
+
+            _items[i] = item;
+        }
+
+        if (looseAmmoData != null && startingLooseRounds >= 0)
+        {
+            _looseAmmo = new LooseAmmoStack( looseAmmoData,startingLooseRounds );
+        }
+    }
+
+    /// <summary>
+    /// 지정한 위치의 실제 탄창 인스턴스를 반환합니다.
+    /// 복사하거나 새로 생성하지 않습니다.
+    /// </summary>
+    public bool TryGetItem(int index, out MagazineItemInstance item)
+    {
+        item = null;
+
+        if (_items == null || index < 0 || index >= _items.Length)
+            return false;
+
+        item = _items[index];
+        return item != null;
+    }
+
+    /// <summary>
+    /// 보유한 낱개 탄약에서 지정한 탄창으로 한 발 이동합니다.
+    /// 현재는 데이터/UI 검증용 즉시 처리입니다.
+    /// </summary>
+    public bool TryLoadOneInto(int index)
+    {
+        if (_looseAmmo == null ||
+            !TryGetItem(index, out MagazineItemInstance item))
+        {
+            return false;
+        }
+
+        return item.TryLoadOneFrom(_looseAmmo);
+    }
+
+    //예약된 탄창에 한 발 넣기
+    public bool TryLoadOneIntoReserved( int index, MagazineItemInstance expectedItem, object reservationOwner)
+    {
+        if (reservationOwner == null ||expectedItem == null || _looseAmmo == null)
+            return false;
+        
+        // 인덱스만 같고 실제 탄창이 교체된 경우를 막습니다.
+        if (!TryGetItem(index, out MagazineItemInstance currentItem) || !ReferenceEquals(currentItem, expectedItem))
+            return false;
+        
+        // 이 작업이 실제로 예약한 탄창인지 확인합니다.
+        if (!currentItem.IsReservedBy(reservationOwner))
+            return false;
+
+        return currentItem.TryLoadOneFrom( _looseAmmo, reservationOwner);
+    }
+    // 예약된 탄창을 교환해도 되는지 검사합니다.
+    // 검사만 수행하며 배열은 변경하지 않습니다.
+    internal bool CanReplaceReservedItem(int index, MagazineItemInstance expected, MagazineItemInstance replacement, object owner)
+    {
+        if (owner == null || expected == null || !expected.IsReservedBy(owner) || !TryGetItem(index, out MagazineItemInstance current) || !ReferenceEquals(current, expected))
+            return false;
+        
+        if (replacement != null && !replacement.IsReservedBy(owner))
+            return false;
+        
+        // 같은 탄창이 배열 여러 곳에 들어가거나,
+        // 반환 탄창이 이미 인벤토리에 있는 경우는 거절합니다.
+        for (int i = 0; i < _items.Length; i++)
+        {
+            if (i != index && ReferenceEquals(_items[i], expected))
+                return false;
+
+            if (replacement != null && ReferenceEquals(_items[i], replacement))
+                return false;
+        }
+
+        return true;
+    }
+
+    // 모든 검증을 완료한 교환 작업에서만 호출합니다.
+    // 이벤트나 UI 갱신은 여기서 실행하지 않습니다.
+    internal void ReplaceItemAfterValidation(int index, MagazineItemInstance replacement)
+    {
+        _items[index] = replacement;
+    }
+
+    [System.Diagnostics.Conditional("UNITY_EDITOR")]
+    [System.Diagnostics.Conditional("DEVELOPMENT_BUILD")]
+    private void ReportInvalidEntry(int index)
+    {
+        Debug.LogError( $"시작 탄창 설정 오류: 인덱스 {index}. " + "탄창 설정, 탄약 구경, 지급 수량을 확인하세요.", this);
+    }
+
+    /// <summary>
+/// 지정한 탄창에 현재 보유한 낱개 탄약을 넣을 수 있는지 확인합니다.
+/// 수량을 변경하거나 예약하지는 않습니다.
+/// </summary>
+    public bool CanSupplyOneRoundTo( int index, MagazineItemInstance expectedItem)
+    {
+        if (expectedItem == null || _looseAmmo == null || _looseAmmo.IsEmpty || _looseAmmo.Ammo == null)
+            return false;
+        
+        if (!TryGetItem(index, out MagazineItemInstance currentItem) || !ReferenceEquals(currentItem, expectedItem))
+            return false;
+        
+        if (currentItem.IsFull || currentItem.Data == null)
+            return false;
+
+        return _looseAmmo.Ammo.caliber == currentItem.Data.Caliber;
+    }
+#if UNITY_EDITOR
+    [ContextMenu("Debug/Load One Into First Magazine")]
+    private void DebugLoadOne()
+    {
+        if (!Application.isPlaying)
+            return;
+
+        bool loaded = TryLoadOneInto(0);
+
+        Debug.Log(
+            $"한 발 삽입: {loaded}, 남은 낱개 탄약: {LooseRoundCount}",
+            this);
+    }
+
+    [ContextMenu("Debug/Load One Into Reserved First Magazine")]
+    private void DebugLoadOneIntoReservedMagazine()
+    {
+        if (!Application.isPlaying)
+            return;
+
+        if (_debugReservedMagazine == null)
+        {
+            Debug.LogWarning(
+                "먼저 Reserve First Magazine을 실행하세요.",
+                this);
+
+            return;
+        }
+
+        const int firstMagazineIndex = 0;
+
+        int looseBefore = LooseRoundCount;
+        int magazineBefore = _debugReservedMagazine.RoundCount;
+
+        bool loaded = TryLoadOneIntoReserved(
+            firstMagazineIndex,
+            _debugReservedMagazine,
+            _debugItemReservationOwner);
+
+        Debug.Log(
+            $"예약 소유자 삽입: {loaded}, " +
+            $"낱개: {looseBefore} → {LooseRoundCount}, " +
+            $"탄창: {magazineBefore} → {_debugReservedMagazine.RoundCount}",
+            this);
+    }
+    [ContextMenu("Debug/Print Magazine Identities")]
+    private void DebugPrintIdentities()
+    {
+        if (!Application.isPlaying)
+            return;
+
+        for (int i = 0; i < ItemCount; i++)
+        {
+            if (!TryGetItem(i, out MagazineItemInstance item))
+                continue;
+
+            Debug.Log(
+                $"슬롯 {i}, ID: {item.InstanceId}, " +
+                $"잔탄: {item.RoundCount}/{item.Capacity}",
+                this);
+        }
+    }
+
+    private readonly object _debugItemReservationOwner = new object();
+    private MagazineItemInstance _debugReservedMagazine;
+
+    [ContextMenu("Debug/Reserve First Magazine")]
+    private void DebugReserveFirstMagazine()
+    {
+        if (!Application.isPlaying)
+            return;
+
+        if (_debugReservedMagazine != null)
+        {
+            Debug.Log("먼저 기존 테스트 예약을 해제하세요.", this);
+            return;
+        }
+
+        EnsureInitialized();
+
+        const int firstMagazineIndex = 0;
+
+        if (!TryGetItem(firstMagazineIndex, out MagazineItemInstance item))
+        {
+            Debug.LogWarning("첫 번째 탄창이 없습니다.", this);
+            return;
+        }
+
+        if (!item.TryReserve(_debugItemReservationOwner))
+        {
+            Debug.LogWarning("이미 다른 작업이 예약한 탄창입니다.", this);
+            return;
+        }
+
+        _debugReservedMagazine = item;
+
+        Debug.Log(
+            $"탄창 예약 성공: {item.InstanceId}",
+            this);
+    }
+
+    [ContextMenu("Debug/Release First Magazine Reservation")]
+    private void DebugReleaseFirstMagazineReservation()
+    {
+        if (!Application.isPlaying || _debugReservedMagazine == null)
+            return;
+
+        bool released = _debugReservedMagazine.ReleaseReservation(
+            _debugItemReservationOwner);
+
+        _debugReservedMagazine = null;
+
+        Debug.Log($"탄창 예약 해제: {released}", this);
+    }
+
+    // 테스트용 예약자가 파괴될 때 자신이 만든 예약을 정리합니다.
+    // OnDisable에서는 해제하지 않습니다.
+    private void OnDestroy()
+    {
+        if (_debugReservedMagazine != null)
+        {
+            _debugReservedMagazine.ReleaseReservation(
+                _debugItemReservationOwner);
+
+            _debugReservedMagazine = null;
+        }
+    }
+#endif
+}

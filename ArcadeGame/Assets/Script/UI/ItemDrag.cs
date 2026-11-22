@@ -1,89 +1,365 @@
-using System;
-using System.Collections;
-using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.EventSystems;
 
+[DisallowMultipleComponent]
+[RequireComponent(typeof(RectTransform), typeof(CanvasGroup))]
 public class ItemDrag : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDragHandler
 {
+    private const float DragAlpha = 0.6f;
 
     public static ItemDrag CurrrentlyDraggedItem;
-    
-    private RectTransform _rectTransform;
-    private CanvasGroup _canvasGroup;
-    private Canvas _canvas;
-    
-    private Vector2 _originalPosition;
 
+    [Header("Item Footprint")]
     public int width = 2;
     public int height = 2;
+
+    [Header("Placement")]
     public InventoryGrid _myGrid;
     public int currentGridX;
     public int currentGridY;
+
+    [Header("Drag")]
+    [SerializeField] private RectTransform dragLayer;
     public Transform itemVisual;
-    private bool _isDragging = false;
+
+    private RectTransform _rect;
+    private CanvasGroup _canvasGroup;
+    private IInventoryItemLock _interactionLock;
+
+    private bool _isDragging;
+    private int _previewWidth;
+    private int _previewHeight;
+
+    private Vector2 _dragPointerLocal;
+    private float _savedAlpha;
+    private bool _savedBlocksRaycasts;
+
+    public bool IsPlaced { get; private set; }
+    public bool IsDragging => _isDragging;
+
+    public bool IsInteractionLocked => _interactionLock != null && _interactionLock.IsReserved;
+
     private void Awake()
     {
-        _rectTransform = GetComponent<RectTransform>();
-        _canvasGroup = GetComponent<CanvasGroup>();
-        
-        _canvas = GetComponentInParent<Canvas>();
-        _myGrid = GetComponentInParent<InventoryGrid>();
+        CacheComponents();
+
+        if (_myGrid == null)
+            _myGrid = GetComponentInParent<InventoryGrid>();
     }
 
+    private void CacheComponents()
+    {
+        // 비활성 UI에서 초기 연결되는 경우도 지원합니다.
+        if (_rect == null)
+            _rect = GetComponent<RectTransform>();
+
+        if (_canvasGroup == null)
+            _canvasGroup = GetComponent<CanvasGroup>();
+    }
+
+    public bool TryInitialize( InventoryGrid initialGrid, int initialWidth, int initialHeight)
+    {
+        CacheComponents();
+
+        if (IsPlaced)
+        {
+            if (!_isDragging)
+                RestoreCommittedPlacement();
+
+            return true;
+        }
+
+        if (initialGrid == null)
+            return false;
+
+        bool placed = initialGrid.TryPlaceItem( this,currentGridX, currentGridY, initialWidth, initialHeight);
+
+        if (!placed && initialGrid.TryFindSpace(initialWidth, initialHeight, out Vector2Int freePosition))
+        {
+            placed = initialGrid.TryPlaceItem( this, freePosition.x, freePosition.y, initialWidth, initialHeight);
+        }
+
+        if (!placed)
+        {
+            _canvasGroup.alpha = 0f;
+            _canvasGroup.blocksRaycasts = false;
+        }
+
+        return placed;
+    }
+
+    internal void ApplyPlacement( InventoryGrid grid, int x, int y, int itemWidth, int itemHeight)
+    {
+        SetPlacementState(grid, x, y, itemWidth, itemHeight);
+        RefreshPlacementVisual();
+    }
+    
+    // 배치 정보만 변경합니다. Transform과 UI는 건드리지 않습니다.
+    internal void SetPlacementState( InventoryGrid grid, int x, int y, int itemWidth, int itemHeight)
+    {
+        _myGrid = grid;
+        currentGridX = x;
+        currentGridY = y;
+
+        width = itemWidth;
+        height = itemHeight;
+
+        IsPlaced = true;
+    }
+
+    // 그리드에서 제거된 상태를 기록합니다.
+    internal void ClearPlacementState()
+    {
+        _myGrid = null;
+        currentGridX = 0;
+        currentGridY = 0;
+        IsPlaced = false;
+    }
+
+    // 데이터 변경이 모두 끝난 뒤 화면을 반영합니다.
+    internal void RefreshPlacementVisual()
+    {
+        CacheComponents();
+
+        if (!IsPlaced)
+        {
+            _canvasGroup.alpha = 0f;
+            _canvasGroup.blocksRaycasts = false;
+            return;
+        }
+
+        RestoreCommittedPlacement();
+
+        _canvasGroup.alpha = 1f;
+        _canvasGroup.blocksRaycasts = true;
+    }
+    // 아이템 RectTransform의 중심을 마우스 위치에 맞춥니다.
+    // Pivot은 변경하지 않아 기존 그리드 배치 계산을 유지합니다.
+    private void AlignCenterToPointer(Vector2 localPointer)
+    {
+        if (dragLayer == null || _rect == null)
+            return;
+
+        _dragPointerLocal = localPointer;
+
+        Vector3 pointerWorld = dragLayer.TransformPoint(new Vector3(localPointer.x, localPointer.y, 0f));
+
+        // Pivot에서 사각형 중심까지의 월드 공간 오프셋입니다.
+        Vector3 centerOffset = _rect.TransformVector((Vector3)_rect.rect.center);
+        _rect.position = pointerWorld - centerOffset;
+    }
     public void OnBeginDrag(PointerEventData eventData)
     {
+        if (IsInteractionLocked)
+            return;
+
+        if (eventData.button != PointerEventData.InputButton.Left || CurrrentlyDraggedItem != null || !IsPlaced || _myGrid == null || dragLayer == null || !dragLayer.gameObject.activeInHierarchy)
+        {
+            return;
+        }
+
+        CacheComponents();
+
+        if (!RectTransformUtility.ScreenPointToLocalPointInRectangle( dragLayer, eventData.position, eventData.pressEventCamera, out Vector2 localPointer))
+        {
+            return;
+        }
+
+        _previewWidth = width;
+        _previewHeight = height;
+
+        _savedAlpha = _canvasGroup.alpha;
+        _savedBlocksRaycasts = _canvasGroup.blocksRaycasts;
+
         _isDragging = true;
         CurrrentlyDraggedItem = this;
-        _originalPosition = _rectTransform.anchoredPosition;
-        _canvasGroup.alpha = 0.6f;
+
+        // UI만 드래그 레이어로 옮깁니다.
+        // 원래 그리드의 비트마스크와 소유 배열은 유지합니다.
+        _rect.SetParent(dragLayer, true);
+        _rect.SetAsLastSibling();
+
+        AlignCenterToPointer(localPointer);
+
+        _canvasGroup.alpha = DragAlpha;
         _canvasGroup.blocksRaycasts = false;
-        if (_myGrid != null)
-        {
-            _myGrid.RemoveItem(this,currentGridX,currentGridY);
-        }
     }
 
     public void OnDrag(PointerEventData eventData)
     {
-        _rectTransform.anchoredPosition += eventData.delta / _canvas.scaleFactor;
+        if (IsInteractionLocked)
+        {
+            CancelDrag();
+            return;
+        }
+
+        if (!_isDragging || dragLayer == null)
+            return;
+
+        if (RectTransformUtility.ScreenPointToLocalPointInRectangle( dragLayer, eventData.position, eventData.pressEventCamera,out Vector2 localPointer))
+        {
+            AlignCenterToPointer(localPointer);
+        }
     }
 
     public void OnEndDrag(PointerEventData eventData)
     {
-        _canvasGroup.alpha = 1f;
-        _canvasGroup.blocksRaycasts = true;
-        CurrrentlyDraggedItem = null;
-        InventoryGrid targetGrid = eventData.pointerEnter?.GetComponentInParent<InventoryGrid>();
-        if (targetGrid)
+        if (IsInteractionLocked)
         {
-            Debug.Log($"마우스가 놓인 실제 픽셀 좌표: {_rectTransform.localPosition.y}");
-            Vector2Int dropIndex = targetGrid.GetIndexFromPosition(_rectTransform.localPosition);
-            if (targetGrid.CanPlaceItem(dropIndex.x, dropIndex.y, this.width, this.height))
-            {
-                transform.SetParent(targetGrid.itemContainer);
-                _rectTransform.localPosition = targetGrid.GetPositionFromIndex(dropIndex.x, dropIndex.y);
-                targetGrid.AddItem(this,dropIndex.x,dropIndex.y);
+            CancelDrag();
+            return;
+        }
 
-                _myGrid = targetGrid;
-                currentGridX = dropIndex.x;
-                currentGridY = dropIndex.y;
-                return;
-            }
-        }
-        _rectTransform.localPosition = _originalPosition;
-        if (_myGrid)
+        if (!_isDragging)
+            return;
+
+        GameObject hitObject = eventData.pointerCurrentRaycast.gameObject;
+
+        WeaponMagazineDropTarget weaponTarget = null;
+
+        if (hitObject != null)
+            weaponTarget = hitObject.GetComponentInParent<WeaponMagazineDropTarget>();
+        
+
+        // 무기 슬롯에 드롭한 경우
+        if (weaponTarget != null)
         {
-            _myGrid.AddItem(this,currentGridX,currentGridY);
+            // 예약 검사가 가능하도록 드래그를 먼저 종료합니다.
+            // 회전 미리보기와 화면 위치도 기존 확정 상태로 복구합니다.
+            CancelDrag();
+
+            // 성공하면 원래 위치에서 예약된 상태로 재장전을 기다립니다.
+            // 실패하면 원래 위치에 그대로 남습니다.
+            weaponTarget.TryAcceptItem(this);
+            return;
         }
+
+        // 일반 인벤토리 그리드에 드롭한 경우
+        InventoryGrid targetGrid = null;
+
+        if (hitObject != null)
+        {
+            targetGrid = hitObject.GetComponentInParent<InventoryGrid>();
+        }
+
+        bool placed = false;
+
+        FinishDragState();
+
+        if (targetGrid != null && targetGrid.isActiveAndEnabled && targetGrid.ContainerRect != null && RectTransformUtility.RectangleContainsScreenPoint( targetGrid.ContainerRect, eventData.position, eventData.pressEventCamera))
+        {
+            Vector2 targetPosition = targetGrid.ContainerRect.InverseTransformPoint( _rect.position);
+
+            Vector2Int cell = targetGrid.GetIndexFromPosition(targetPosition);
+
+            placed = targetGrid.TryPlaceItem( this, cell.x, cell.y, _previewWidth, _previewHeight);
+        }
+
+        if (!placed)
+            RestoreCommittedPlacement();
     }
 
     public void RotateItem()
     {
-        (width, height) = (height, width);
-        Vector2 currentSize = _rectTransform.sizeDelta;
-        _rectTransform.sizeDelta = new Vector2(currentSize.y, currentSize.x);
-        //비주얼 아이템 넣으면 하기
-        //if(itemVisual) itemVisual.Rotate(0,0,-90f);
+
+        if (IsInteractionLocked)
+        {
+            CancelDrag();
+            return;
+        }
+        if (!_isDragging || _myGrid == null)
+            return;
+
+        int previousWidth = _previewWidth;
+        _previewWidth = _previewHeight;
+        _previewHeight = previousWidth;
+
+        // 확정 width/height는 변경하지 않습니다.
+        _rect.sizeDelta = _myGrid.GetItemSize(_previewWidth, _previewHeight);
+        AlignCenterToPointer(_dragPointerLocal);
+    }
+
+    public void CancelDrag()
+    {
+        if (!_isDragging)
+            return;
+
+        FinishDragState();
+        RestoreCommittedPlacement();
+    }
+
+    private void FinishDragState()
+    {
+        _isDragging = false;
+
+        if (CurrrentlyDraggedItem == this)
+            CurrrentlyDraggedItem = null;
+
+        if (_canvasGroup != null)
+        {
+            _canvasGroup.alpha = _savedAlpha;
+            _canvasGroup.blocksRaycasts = _savedBlocksRaycasts;
+        }
+    }
+
+    private void RestoreCommittedPlacement()
+    {
+        if (!IsPlaced || _myGrid == null || _myGrid.ContainerRect == null || _rect == null)
+        {
+            return;
+        }
+
+        _rect.SetParent(_myGrid.ContainerRect, false);
+
+        _rect.anchorMin = new Vector2(0f, 1f);
+        _rect.anchorMax = new Vector2(0f, 1f);
+        _rect.pivot = new Vector2(0f, 1f);
+
+        _rect.localScale = Vector3.one;
+        _rect.localRotation = Quaternion.identity;
+
+        _rect.anchoredPosition =
+            _myGrid.GetPositionFromIndex(currentGridX, currentGridY);
+
+        _rect.sizeDelta =
+            _myGrid.GetItemSize(width, height);
+    }
+
+    /// <summary>
+    /// 이 UI가 표시하는 실제 아이템의 잠금 정보를 연결합니다.
+    /// 이 함수가 직접 예약하거나 해제하지는 않습니다.
+    /// </summary>
+    public void BindInteractionLock(IInventoryItemLock source)
+    {
+        if (ReferenceEquals(_interactionLock, source))
+            return;
+
+        // 다른 데이터로 연결을 바꾸는 동안 드래그를 유지하지 않습니다.
+        CancelDrag();
+        _interactionLock = source;
+    }
+    // 화면에 연결된 잠금 정보가 전달한 실제 아이템인지 검사합니다.
+    public bool IsBoundTo(IInventoryItemLock source)
+    {
+        return source != null && ReferenceEquals(_interactionLock, source);
+    }
+
+    // 특정 작업자가 이 아이템을 예약했는지 검사합니다.
+    public bool IsReservedBy(object owner)
+    {
+        return _interactionLock != null && _interactionLock.IsReservedBy(owner);
+    }
+    private void OnDisable()
+    {
+        CancelDrag();
+    }
+
+    private void OnDestroy()
+    {
+        if (CurrrentlyDraggedItem == this)
+            CurrrentlyDraggedItem = null;
+
+        if (IsPlaced && _myGrid != null)
+            _myGrid.ForgetDestroyedItem(this);
     }
 }

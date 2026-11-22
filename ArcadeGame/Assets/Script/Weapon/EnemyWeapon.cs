@@ -34,7 +34,7 @@ public sealed class EnemyWeapon : MonoBehaviour
 
     private BulletData _configuredAmmo;
     private float _remainingSpreadRecoveryDelay;
-
+    public event Action Fired;
     public WeaponData Data => weaponData;
     public bool IsReloading => _ammoSupply != null && _ammoSupply.IsReloading;
     public bool IsCycling => _ammoSupply != null && _ammoSupply.IsCycling;
@@ -177,7 +177,7 @@ public sealed class EnemyWeapon : MonoBehaviour
         CurrentSpread = Mathf.Clamp(CurrentSpread + Mathf.Max(0f, weaponData.bloomPerShot), baseSpread, maximumSpread);
 
         _remainingSpreadRecoveryDelay = weaponData.GetShotInterval(weaponData.fireMode);
-
+        Fired?.Invoke();
         return true;
     }
 
