@@ -35,13 +35,19 @@ public sealed class MagazineItemInstance : IInventoryItemLock
         _ammo = new AmmoMagazine(data.Caliber, data.Capacity);
     }
 
-    // 낱개 탄약 묶음에서 이 탄창으로 한 발 이동합니다.
-    // 성공한 경우에만 원본 탄약 수가 줄어듭니다.
-    public bool TryLoadOneFrom(LooseAmmoStack source)
+
+    /// 낱개 탄약에서 이 탄창으로 한 발을 옮깁니다.
+    /// 예약된 탄창은 해당 예약 소유자만 변경할 수 있습니다
+    public bool TryLoadOneFrom( LooseAmmoStack source, object reservationOwner = null)
     {
-        if (source == null || IsReserved)
+        if (source == null)
             return false;
 
+        // 다른 작업이 사용 중인 탄창은 변경할 수 없습니다.
+        if (IsReserved && !IsReservedBy(reservationOwner))
+            return false;
+
+        // 구경, 남은 탄약, 탄창 용량 검사는 기존 로직에서 처리합니다.
         if (!source.TryLoadOneInto(_ammo))
             return false;
 
