@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Test_Bullet
   m_EditorClassIdentifier: 
   bulletName: 
-  caliber: {fileID: 0}
+  caliber: {fileID: 11400000, guid: 7e652296538053642ac60638da4da36f, type: 2}
   damage: 5
   penetrationLevel: 0
   projectilesPerRound: 1

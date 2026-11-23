@@ -7432,8 +7432,13 @@ MonoBehaviour:
   - data: {fileID: 11400000, guid: b92cce7f0fefdb144a6d3d146389b4fa, type: 2}
     ammo: {fileID: 11400000, guid: c2f1cfcda11c49e428995948a039a726, type: 2}
     rounds: 20
-  looseAmmoData: {fileID: 11400000, guid: c2f1cfcda11c49e428995948a039a726, type: 2}
-  startingLooseRounds: 10
+  startingAmmoStacks:
+  - ammo: {fileID: 11400000, guid: c2f1cfcda11c49e428995948a039a726, type: 2}
+    rounds: 10
+  - ammo: {fileID: 11400000, guid: dc6d3a689b127bc4bb4ecda5eaf54abd, type: 2}
+    rounds: 20
+  - ammo: {fileID: 11400000, guid: 9c2dcd5eeca1db44680f0032678965d7, type: 2}
+    rounds: 15
 --- !u!114 &1237701272
 MonoBehaviour:
   m_ObjectHideFlags: 0

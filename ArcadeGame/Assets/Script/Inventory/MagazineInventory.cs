@@ -4,6 +4,7 @@ using UnityEngine;
 [DisallowMultipleComponent]
 public sealed class MagazineInventory : MonoBehaviour
 {
+    private const int DefaultAmmoStackIndex = 0;
     [Serializable]
     private sealed class StartingMagazine
     {
@@ -17,18 +18,43 @@ public sealed class MagazineInventory : MonoBehaviour
     [Header("Starting Magazines")]
     [SerializeField] private StartingMagazine[] startingMagazines;
 
-    [Header("Loose Ammunition")]
-    [SerializeField] private BulletData looseAmmoData;
+    [Serializable]
+    private sealed class StartingAmmoStack
+    {
+        public BulletData ammo;
 
-    [SerializeField, Min(0)] private int startingLooseRounds = 10;
+        [Min(0)] public int rounds = 10;
+    }
 
+    [Header("Starting Loose Ammunition")]
+    [SerializeField] private StartingAmmoStack[] startingAmmoStacks;
     private MagazineItemInstance[] _items;
-    private LooseAmmoStack _looseAmmo;
+    private LooseAmmoStack[] _ammoStacks;
     private bool _initialized;
 
     public int ItemCount => _items != null ? _items.Length : 0;
+    public int AmmoStackCount => _ammoStacks != null ? _ammoStacks.Length : 0;
+    // 모든 탄약 묶음의 총수량입니다.
+// 개별 탄종 UI는 해당 LooseAmmoStack.Count를 표시합니다.
+    public int LooseRoundCount
+    {
+        get
+        {
+            int total = 0;
+            if (_ammoStacks == null)
+                return total;
 
-    public int LooseRoundCount => _looseAmmo != null ? _looseAmmo.Count : 0;
+            for (int i = 0; i < _ammoStacks.Length; i++)
+            {
+                LooseAmmoStack stack = _ammoStacks[i];
+
+                if (stack != null)
+                    total += stack.Count;
+            }
+
+            return total;
+        }
+    }
 
     private void Awake()
     {
@@ -81,9 +107,22 @@ public sealed class MagazineInventory : MonoBehaviour
             _items[i] = item;
         }
 
-        if (looseAmmoData != null && startingLooseRounds >= 0)
+        int stackCount = startingAmmoStacks != null ? startingAmmoStacks.Length : 0;
+
+        _ammoStacks = new LooseAmmoStack[stackCount];
+
+        for (int i = 0; i < stackCount; i++)
         {
-            _looseAmmo = new LooseAmmoStack( looseAmmoData,startingLooseRounds );
+            StartingAmmoStack entry = startingAmmoStacks[i];
+
+            if (entry == null || entry.ammo == null || entry.ammo.caliber == null || entry.rounds <= 0)
+            {
+                ReportInvalidAmmoStack(i);
+                continue;
+            }
+
+            // 같은 BulletData여도 실제 묶음은 각각 별도 인스턴스입니다.
+            _ammoStacks[i] = new LooseAmmoStack(entry.ammo, entry.rounds);
         }
     }
 
@@ -108,30 +147,25 @@ public sealed class MagazineInventory : MonoBehaviour
     /// </summary>
     public bool TryLoadOneInto(int index)
     {
-        if (_looseAmmo == null ||
-            !TryGetItem(index, out MagazineItemInstance item))
-        {
+        if (!TryGetAmmoStack( DefaultAmmoStackIndex,out LooseAmmoStack source) || !TryGetItem(index, out MagazineItemInstance item))
             return false;
-        }
-
-        return item.TryLoadOneFrom(_looseAmmo);
+        
+        return item.TryLoadOneFrom(source);
     }
 
     //예약된 탄창에 한 발 넣기
     public bool TryLoadOneIntoReserved( int index, MagazineItemInstance expectedItem, object reservationOwner)
     {
-        if (reservationOwner == null ||expectedItem == null || _looseAmmo == null)
+        if (reservationOwner == null || expectedItem == null || !TryGetAmmoStack( DefaultAmmoStackIndex, out LooseAmmoStack source))
             return false;
         
-        // 인덱스만 같고 실제 탄창이 교체된 경우를 막습니다.
-        if (!TryGetItem(index, out MagazineItemInstance currentItem) || !ReferenceEquals(currentItem, expectedItem))
-            return false;
-        
-        // 이 작업이 실제로 예약한 탄창인지 확인합니다.
-        if (!currentItem.IsReservedBy(reservationOwner))
-            return false;
 
-        return currentItem.TryLoadOneFrom( _looseAmmo, reservationOwner);
+        if (!TryGetItem(index, out MagazineItemInstance currentItem) || !ReferenceEquals(currentItem, expectedItem) || !currentItem.IsReservedBy(reservationOwner))
+        {
+            return false;
+        }
+
+        return currentItem.TryLoadOneFrom(source, reservationOwner);
     }
     // 예약된 탄창을 교환해도 되는지 검사합니다.
     // 검사만 수행하며 배열은 변경하지 않습니다.
@@ -172,21 +206,46 @@ public sealed class MagazineInventory : MonoBehaviour
     }
 
     /// <summary>
-/// 지정한 탄창에 현재 보유한 낱개 탄약을 넣을 수 있는지 확인합니다.
-/// 수량을 변경하거나 예약하지는 않습니다.
-/// </summary>
-    public bool CanSupplyOneRoundTo( int index, MagazineItemInstance expectedItem)
+    /// 지정한 탄창에 현재 보유한 낱개 탄약을 넣을 수 있는지 확인합니다.
+    /// 수량을 변경하거나 예약하지는 않습니다.
+    /// </summary>
+    public bool CanSupplyOneRoundTo(int index, MagazineItemInstance expectedItem)
     {
-        if (expectedItem == null || _looseAmmo == null || _looseAmmo.IsEmpty || _looseAmmo.Ammo == null)
+        if (expectedItem == null || !TryGetItem(index, out MagazineItemInstance currentItem) || !ReferenceEquals(currentItem, expectedItem) || currentItem.IsFull)
             return false;
         
-        if (!TryGetItem(index, out MagazineItemInstance currentItem) || !ReferenceEquals(currentItem, expectedItem))
-            return false;
-        
-        if (currentItem.IsFull || currentItem.Data == null)
-            return false;
+        return IsCompatibleAmmoStack(DefaultAmmoStackIndex,currentItem);
+    }
 
-        return _looseAmmo.Ammo.caliber == currentItem.Data.Caliber;
+    
+    //지정한 위치의 실제 탄약 묶음
+    public bool TryGetAmmoStack( int index, out LooseAmmoStack stack)
+    {
+        stack = null;
+        if (_ammoStacks == null || index < 0 || index >= _ammoStacks.Length)
+            return false;
+        
+        stack = _ammoStacks[index];
+        return stack != null;
+    }
+
+    //탄약 묶음과 호환이 되는지 확인
+    public bool IsCompatibleAmmoStack( int ammoStackIndex, MagazineItemInstance magazine)
+    {
+        if (magazine == null || magazine.Data == null || !TryGetAmmoStack(ammoStackIndex, out LooseAmmoStack stack) || stack.IsEmpty || stack.Ammo == null)
+            return false;
+        
+        return stack.Ammo.caliber == magazine.Data.Caliber;
+    }
+    
+    [System.Diagnostics.Conditional("UNITY_EDITOR")]
+    [System.Diagnostics.Conditional("DEVELOPMENT_BUILD")]
+    private void ReportInvalidAmmoStack(int index)
+    {
+        Debug.LogError(
+            $"시작 탄약 묶음 설정 오류: 인덱스 {index}. " +
+            "탄약 데이터, 구경, 수량을 확인하세요.",
+            this);
     }
 #if UNITY_EDITOR
     [ContextMenu("Debug/Load One Into First Magazine")]
@@ -302,7 +361,44 @@ public sealed class MagazineInventory : MonoBehaviour
 
         Debug.Log($"탄창 예약 해제: {released}", this);
     }
+    [ContextMenu("Debug/Print Compatible Ammo For First Magazine")]
+    private void DebugPrintCompatibleAmmo()
+    {
+        if (!Application.isPlaying)
+            return;
 
+        const int firstMagazineIndex = 0;
+
+        if (!TryGetItem(
+                firstMagazineIndex,
+                out MagazineItemInstance magazine))
+        {
+            Debug.LogWarning("첫 번째 탄창이 없습니다.", this);
+            return;
+        }
+
+        int compatibleCount = 0;
+
+        for (int i = 0; i < AmmoStackCount; i++)
+        {
+            if (!IsCompatibleAmmoStack(i, magazine))
+                continue;
+
+            if (!TryGetAmmoStack(i, out LooseAmmoStack stack))
+                continue;
+
+            compatibleCount++;
+
+            Debug.Log(
+                $"호환 탄약 — 묶음 {i}, " +
+                $"{stack.Ammo.bulletName}, {stack.Count}발",
+                this);
+        }
+
+        Debug.Log(
+            $"호환되는 탄약 묶음: {compatibleCount}개",
+            this);
+    }
     // 테스트용 예약자가 파괴될 때 자신이 만든 예약을 정리합니다.
     // OnDisable에서는 해제하지 않습니다.
     private void OnDestroy()
