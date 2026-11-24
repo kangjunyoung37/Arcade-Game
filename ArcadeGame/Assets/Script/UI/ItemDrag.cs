@@ -38,7 +38,7 @@ public class ItemDrag : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDrag
     public bool IsDragging => _isDragging;
 
     public bool IsInteractionLocked => _interactionLock != null && _interactionLock.IsReserved;
-
+    public IInventoryItemLock BoundItem => _interactionLock;
     private void Awake()
     {
         CacheComponents();
@@ -214,7 +214,24 @@ public class ItemDrag : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDrag
             return;
 
         GameObject hitObject = eventData.pointerCurrentRaycast.gameObject;
+        
+        // 탄약을 탄창 UI 위에 놓은 경우
+        MagazineAmmoDropTarget ammoTarget = null;
 
+        if (hitObject != null)
+        {
+            ammoTarget = hitObject.GetComponentInParent<MagazineAmmoDropTarget>();
+        }
+
+        if (ammoTarget != null && BoundItem is LooseAmmoStack)
+        {
+            // 원래 위치로 복귀시키고 드래그 상태를 먼저 끝냅니다.
+            // 그다음 채우기 작업이 탄약과 탄창을 예약합니다.
+            CancelDrag();
+
+            ammoTarget.TryAcceptItem(this);
+            return;
+        }
         WeaponMagazineDropTarget weaponTarget = null;
 
         if (hitObject != null)

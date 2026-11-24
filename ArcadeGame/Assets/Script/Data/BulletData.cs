@@ -25,6 +25,9 @@ public class BulletData : ScriptableObject
    [Min(MinimumPositiveValue)] public float speed = 60f;
 
    [Min(MinimumPositiveValue)] public float lifetime = 5f;
+   
+   [Header("Inventory")]
+   public Sprite inventoryIcon;
 
 #if UNITY_EDITOR
    private void OnValidate()

@@ -216,8 +216,38 @@ public sealed class MagazineInventory : MonoBehaviour
         
         return IsCompatibleAmmoStack(DefaultAmmoStackIndex,currentItem);
     }
+    /// <summary>
+    /// 작업 시작 때 선택한 탄창과 탄약 묶음이
+    /// 지금도 같은 인벤토리 위치에 있는지 검사합니다.
+    /// </summary>
+    public bool CanSupplyOneRoundTo(int magazineIndex, MagazineItemInstance expectedMagazine, int ammoStackIndex, LooseAmmoStack expectedSource)
+    {
+        if (expectedMagazine == null || expectedSource == null)
+            return false;
 
-    
+        if (!TryGetItem(magazineIndex, out MagazineItemInstance currentMagazine) || !ReferenceEquals(currentMagazine, expectedMagazine))
+            return false;
+        
+
+        if (!TryGetAmmoStack( ammoStackIndex,out LooseAmmoStack currentSource) || !ReferenceEquals(currentSource, expectedSource))
+            return false;
+        
+        if (currentMagazine.IsFull)
+            return false;
+
+        return IsCompatibleAmmoStack(ammoStackIndex, currentMagazine);
+    }
+
+    public bool TryLoadOneIntoReserved(int magazineIndex, MagazineItemInstance expectedMagazine, int ammoStackIndex, LooseAmmoStack expectedSource, object reservationOwner)
+    {
+        if (reservationOwner == null || !CanSupplyOneRoundTo(magazineIndex, expectedMagazine, ammoStackIndex, expectedSource))   
+            return false;
+
+        if (!expectedMagazine.IsReservedBy(reservationOwner) || !expectedSource.IsReservedBy(reservationOwner))
+            return false;
+        
+        return expectedMagazine.TryLoadOneFrom(expectedSource, reservationOwner);
+    }
     //지정한 위치의 실제 탄약 묶음
     public bool TryGetAmmoStack( int index, out LooseAmmoStack stack)
     {

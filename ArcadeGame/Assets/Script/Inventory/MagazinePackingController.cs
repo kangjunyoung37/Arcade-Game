@@ -16,30 +16,33 @@ public sealed class MagazinePackingController : MonoBehaviour
 
     private MagazineInventory _inventory;
     private MagazineItemInstance _target;
+    private LooseAmmoStack _source;
 
     private int _targetIndex = -1;
+    private int _sourceIndex = -1;
+
     private float _roundDuration;
     private float _remainingSeconds;
-
-    // 탄창 Changed 이벤트 처리 중 새로운 작업이 시작되는 것을 막습니다.
     private bool _isTransferring;
 
     public bool IsPacking => _target != null;
 
-    // 탄창 전체가 아니라 현재 넣고 있는 한 발의 진행률입니다.
+    public MagazineItemInstance TargetMagazine => _target;
+    public LooseAmmoStack SourceAmmo => _source;
+
     public float CurrentRoundProgress => IsPacking && _roundDuration > 0f ? Mathf.Clamp01(1f - _remainingSeconds / _roundDuration) : 0f;
+
     public float CurrentRoundRemainingSeconds => IsPacking ? Mathf.Max(0f, _remainingSeconds) : 0f;
 
-    // 작업 시작·종료 알림입니다. 매 프레임 호출하지 않습니다.
     public event Action StateChanged;
 
     private bool IsInventoryOpen => inventoryWindow != null && inventoryWindow.activeInHierarchy;
 
-    /// <summary>
-    /// 지정한 인벤토리 탄창에 연속 삽입 작업을 시작합니다.
-    /// 시작 시에는 탄약을 소모하지 않습니다.
-    /// </summary>
-    public bool TryStartPacking(int inventoryIndex)
+    
+    // 선택한 탄약 묶음으로 선택한 탄창을 채웁니다.
+    // 시작할 때는 탄약을 소비하지 않습니다.
+  
+    public bool TryStartPacking( int magazineIndex, int ammoStackIndex)
     {
         if (!isActiveAndEnabled || IsPacking || _isTransferring || !IsInventoryOpen || Time.timeScale <= 0f || presenter == null)
             return false;
@@ -49,25 +52,54 @@ public sealed class MagazinePackingController : MonoBehaviour
         if (inventory == null || !inventory.isActiveAndEnabled)
             return false;
 
-        if (!presenter.TryGetBoundItem( inventoryIndex, out MagazineItemInstance item, out _, out ItemDrag drag))
+        if (!presenter.TryGetBoundItem(magazineIndex, out MagazineItemInstance magazine, out _, out ItemDrag drag))
             return false;
         
-        // 드래그 중이거나 다른 작업이 사용하는 탄창은 선택하지 않습니다.
-        if (drag == null || drag.IsDragging || item.IsReserved || !inventory.CanSupplyOneRoundTo(inventoryIndex, item))
+
+        if (!inventory.TryGetAmmoStack(ammoStackIndex, out LooseAmmoStack source))
+        {
             return false;
-        
-        // 이 컴포넌트 자체를 예약 소유자로 사용합니다.
-        if (!item.TryReserve(this))
+        }
+
+        if (drag == null || drag.IsDragging || magazine.IsReserved || source.IsReserved || !inventory.CanSupplyOneRoundTo(magazineIndex, magazine, ammoStackIndex, source))
             return false;
+
+        // 두 아이템을 모두 예약해야 작업을 시작합니다.
+        if (!magazine.TryReserve(this))
+            return false;
+
+        if (!source.TryReserve(this))
+        {
+            // 두 번째 예약이 실패하면 첫 번째 예약도 되돌립니다.
+            magazine.ReleaseReservation(this);
+            return false;
+        }
 
         _inventory = inventory;
-        _target = item;
-        _targetIndex = inventoryIndex;
+        _target = magazine;
+        _source = source;
+        _targetIndex = magazineIndex;
+        _sourceIndex = ammoStackIndex;
 
-        _roundDuration = Mathf.Max( MinimumSecondsPerRound, secondsPerRound);
+        _roundDuration = Mathf.Max(MinimumSecondsPerRound, secondsPerRound);
+
         _remainingSeconds = _roundDuration;
+
         StateChanged?.Invoke();
         return true;
+    }
+
+
+    // 작업 중에도 두 아이템을 다시 검사합니다.
+    private bool CanContinuePacking()
+    {
+        return IsPacking && IsInventoryOpen &&
+               _inventory != null &&
+               _inventory.isActiveAndEnabled &&
+               _source != null &&
+               _target.IsReservedBy(this) &&
+               _source.IsReservedBy(this) &&
+               _inventory.CanSupplyOneRoundTo(_targetIndex, _target,_sourceIndex, _source);
     }
 
     private void Update()
@@ -75,8 +107,7 @@ public sealed class MagazinePackingController : MonoBehaviour
         if (!IsPacking)
             return;
 
-        // 창 닫기, 데이터 소실, 예약 해제 등의 상황에서 정리합니다.
-        if (!IsInventoryOpen || _inventory == null || !_inventory.isActiveAndEnabled || !_target.IsReservedBy(this) || !_inventory.CanSupplyOneRoundTo(_targetIndex, _target))
+        if (!CanContinuePacking())
         {
             CancelPacking();
             return;
@@ -84,58 +115,66 @@ public sealed class MagazinePackingController : MonoBehaviour
 
         float deltaTime = Time.deltaTime;
 
-        // 일시정지 상태에서는 진행하지 않습니다.
         if (deltaTime <= 0f)
             return;
 
-        _remainingSeconds = Mathf.Max(0f,_remainingSeconds - deltaTime);
+        _remainingSeconds = Mathf.Max(0f, _remainingSeconds - deltaTime);
 
         if (_remainingSeconds > 0f)
             return;
 
-        // 다음 한 발의 시간을 준비한 뒤 실제 탄약을 옮깁니다.
         _remainingSeconds = _roundDuration;
 
         bool loaded;
-
         _isTransferring = true;
 
         try
         {
-            loaded = _inventory.TryLoadOneIntoReserved( _targetIndex ,_target, this);
+            loaded = _inventory.TryLoadOneIntoReserved(_targetIndex, _target, _sourceIndex, _source, this);
+        }
+        catch
+        {
+            // UI 이벤트 등에 예외가 생겨도 예약은 남기지 않습니다.
+            CancelPacking();
+            throw;
         }
         finally
         {
             _isTransferring = false;
         }
 
-        // 탄창 Changed 이벤트에서 작업이 취소됐을 수도 있습니다.
+        // 데이터 변경 이벤트에서 취소했을 수도 있습니다.
         if (!IsPacking)
             return;
 
-        if (!loaded || _inventory == null || !_inventory.CanSupplyOneRoundTo(_targetIndex, _target))
-        {
+        if (!loaded || !CanContinuePacking())
             CancelPacking();
-        }
     }
 
 
-    //탄창 예약 해제
+    // 완료, 취소 시 두 아이템의 예약을 모두 해제합니다.
+    // 이미 옮긴 탄약은 그대로 유지합니다.
     public void CancelPacking()
     {
         if (!IsPacking)
             return;
 
         MagazineItemInstance target = _target;
+        LooseAmmoStack source = _source;
 
-        // 외부 알림 전에 내부 상태와 예약을 정리합니다.
         _target = null;
+        _source = null;
         _inventory = null;
+
         _targetIndex = -1;
+        _sourceIndex = -1;
         _roundDuration = 0f;
         _remainingSeconds = 0f;
 
         target.ReleaseReservation(this);
+
+        if (source != null)
+            source.ReleaseReservation(this);
 
         StateChanged?.Invoke();
     }
@@ -146,26 +185,64 @@ public sealed class MagazinePackingController : MonoBehaviour
     }
 
 #if UNITY_EDITOR
-    [ContextMenu("Debug/Start Packing First Magazine")]
+    [Header("Debug Selection")]
+    [SerializeField, Min(0)] private int debugMagazineIndex;
+    [SerializeField, Min(0)] private int debugAmmoStackIndex;
+
+    [ContextMenu("Debug/Start Packing Selected Ammo")]
     private void DebugStartPacking()
     {
         if (!Application.isPlaying)
             return;
 
-        const int firstMagazineIndex = 0;
+        bool started = TryStartPacking(
+            debugMagazineIndex,
+            debugAmmoStackIndex);
 
-        bool started = TryStartPacking(firstMagazineIndex);
-
-        Debug.Log($"탄창 채우기 시작: {started}", this);
+        Debug.Log(
+            $"채우기 시작={started}, " +
+            $"탄창={debugMagazineIndex}, " +
+            $"탄약 묶음={debugAmmoStackIndex}",
+            this);
     }
 
     [ContextMenu("Debug/Cancel Packing")]
     private void DebugCancelPacking()
     {
-        if (!Application.isPlaying)
-            return;
+        if (Application.isPlaying)
+            CancelPacking();
+    }
 
-        CancelPacking();
+    [ContextMenu("Debug/Print Ammo Stacks")]
+    private void DebugPrintAmmoStacks()
+    {
+        if (!Application.isPlaying ||
+            presenter == null ||
+            presenter.Inventory == null)
+        {
+            return;
+        }
+
+        MagazineInventory inventory = presenter.Inventory;
+
+        for (int i = 0; i < inventory.AmmoStackCount; i++)
+        {
+            if (!inventory.TryGetAmmoStack(
+                    i,
+                    out LooseAmmoStack stack))
+            {
+                continue;
+            }
+
+            string ammoName = stack.Ammo != null
+                ? stack.Ammo.bulletName
+                : "(Missing)";
+
+            Debug.Log(
+                $"묶음 {i}: {ammoName}, " +
+                $"{stack.Count}발, 예약={stack.IsReserved}",
+                this);
+        }
     }
 #endif
 }

@@ -1,13 +1,19 @@
 using System;
 
-
-/// 같은 종류의 낱개 탄약 묶음입니다.
-public sealed class LooseAmmoStack
+/// <summary>
+/// 같은 종류의 낱개 탄약을 보관하는 실제 묶음입니다.
+/// </summary>
+public sealed class LooseAmmoStack : IInventoryItemLock
 {
+    private object _reservationOwner;
+
     public BulletData Ammo { get; }
     public int Count { get; private set; }
 
     public bool IsEmpty => Count == 0;
+    public bool IsReserved => _reservationOwner != null;
+
+    public event Action Changed;
 
     public LooseAmmoStack(BulletData ammo, int count)
     {
@@ -22,19 +28,46 @@ public sealed class LooseAmmoStack
     }
 
 
-    // 이 탄약 묶음에서 대상 탄창으로 정확히 한 발 이동합니다.
-    // 실패하면 양쪽의 탄약 수는 변하지 않습니다.
-    public bool TryLoadOneInto(AmmoMagazine magazine)
+    // 성공한 경우에만 탄약 한 발을 실제로 옮깁니다.
+    // 예약된 묶음은 예약 소유자만 사용할 수 있습니다.
+    public bool TryLoadOneInto(AmmoMagazine magazine, object reservationOwner = null)
     {
         if (magazine == null || IsEmpty || Ammo == null)
             return false;
 
-        // 탄창 가득 참, 구경 불일치 등 AmmoMagazine이 검사합니다.
+        if (IsReserved && !IsReservedBy(reservationOwner))
+            return false;
+
         if (!magazine.TryLoadRound(Ammo))
             return false;
 
-        // 탄창에 실제로 들어간 경우에만 원본 수량을 줄입니다.
         Count--;
+
+        // 탄창 증가와 원본 감소가 모두 끝난 후 알립니다.
+        Changed?.Invoke();
+        return true;
+    }
+
+    public bool TryReserve(object owner)
+    {
+        if (owner == null || IsReserved)
+            return false;
+
+        _reservationOwner = owner;
+        return true;
+    }
+
+    public bool IsReservedBy(object owner)
+    {
+        return owner != null && ReferenceEquals(_reservationOwner, owner);
+    }
+
+    public bool ReleaseReservation(object owner)
+    {
+        if (!IsReservedBy(owner))
+            return false;
+
+        _reservationOwner = null;
         return true;
     }
 }

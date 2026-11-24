@@ -48,7 +48,7 @@ public sealed class MagazineItemInstance : IInventoryItemLock
             return false;
 
         // 구경, 남은 탄약, 탄창 용량 검사는 기존 로직에서 처리합니다.
-        if (!source.TryLoadOneInto(_ammo))
+        if (!source.TryLoadOneInto(_ammo, reservationOwner))
             return false;
 
         Changed?.Invoke();
